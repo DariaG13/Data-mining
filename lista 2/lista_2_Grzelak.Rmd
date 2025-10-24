@@ -1,0 +1,812 @@
+---
+title: "Sprawozdanie z listy 2"
+subtitle: "Eksploracja danych"
+author: "Daria Grzelak, 277533"
+date: "`r Sys.Date()`"
+header-includes:
+   - \usepackage[OT4]{polski}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, cache=TRUE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+```{r ustawienia, echo=FALSE}
+# Potrzebne pakiety
+library(rstudioapi) #set wd
+library(arules) #dyskretyzacja
+library(e1071) #funkcja matchClasses
+library(plot3D) #wykresy 3d
+library("FactoMineR") #dwuwykres
+library(factoextra) #dwuwykres
+library(titanic) #dane titanic
+library(cluster) #funkcja daisy
+library(corrplot) # wizualizacja macierzy korelacji
+library("gplots") # Heatmap
+
+# Ustawienie wd
+current_path=rstudioapi::getActiveDocumentContext()$path 
+setwd(dirname(current_path))
+```
+
+# Dyskretyzacja (przedziałowanie) cech ciągłych
+W pierwszej części niniejszego raportu przedstawię dyskretyzację cech ciągłych w celu otrzymania prostszego modelu, dla którego łatwiej będzie zinterpretować wyniki.
+
+## Wykorzystane metody
+W mojej analizie wykorzystam następujące narzędzia:
+
+* narzędzia analizy opisowej do wybrania najlepszych i najgorszych cech dyskryminacyjnych,
+* cztery metody dyskretyzacji nienadzorowanej: według równej częstotliwości, według równej szerokości, oparta na algorytmie k-średnich, o przedziałach zadanych przez użytkownika,
+* wykresy wykonane w celu wizualizacji wyników.
+
+## Opis danych
+Dane, które będę analizować, to ``iris`` z R-pakietu datasets, zawierający obserwacje na temat trzech gatunków irysów.
+
+```{r dane_iris}
+# Wczytanie danych
+data(iris)
+attach(iris)
+```
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Nazwa}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+Sepal.Length & Liczbowa & Długość działki kielicha \\
+\hline
+Sepal.Width & Liczbowa & Szerokość działki kielicha \\
+\hline
+Petal.Length & Liczbowa & Długość płatka \\
+\hline
+Petal.Width & Liczbowa & Szerokość płatka \\
+\hline
+Species & Jakościowa & Gatunek \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych iris}
+\label{opis_cech_1}
+\end{table}
+
+W tabeli&nbsp;\ref{opis_cech_1} umieszczam opis cech zawartych w tych danych.
+
+## Wybór cech do dyskretyzacji
+W tej części przeanalizuję poszczególne cechy, aby stwierdzić, na postawie której z nich da się najlepiej oraz najgorzej rozróżnić gatunki irysów. Następnie dla tych dwóch cech (najlepszej i najgorszej) dokonam dalszych analiz.
+
+Analizy dokonam, tworząc wykresy pudełkowe dla poszczególnych zmiennych, z rozróżnieniem na gatunki irysów.
+
+```{r boxplot_iris_Sepal.Length_c, echo=FALSE, fig.cap="\\label{fig:boxplot_iris_Sepal.Length}Wykres pudełkowy dla zmiennej Sepal.Length"}
+# Kolory dla wykresów pudełkowych
+kolory.boxplot.iris=c("#7F4BEA", "#F3E688", "#973F57")
+
+# Wykres dla Sepal.Length
+boxplot(Sepal.Length~Species, col=kolory.boxplot.iris, main="Sepal.Length")
+
+```
+```{r boxplot_iris_Sepal.Width_c, echo=FALSE, fig.cap="\\label{fig:boxplot_iris_Sepal.Width}Wykres pudełkowy dla zmiennej Sepal.Width"}
+boxplot(Sepal.Width~Species, col=kolory.boxplot.iris, main="Sepal.Width")
+
+```
+
+```{r boxplot_iris_Petal.Length_c, echo=FALSE, fig.cap="\\label{fig:boxplot_iris_Petal.Length}Wykres pudełkowy dla zmiennej Petal.Length"}
+boxplot(Petal.Length~Species, col=kolory.boxplot.iris, main="Petal.Length")
+
+```
+
+```{r boxplot_iris_Petal.Width_c, echo=FALSE, fig.cap="\\label{fig:boxplot_iris_Petal.Width}Wykres pudełkowy dla zmiennej Petal.Width"}
+boxplot(Petal.Width~Species, col=kolory.boxplot.iris, main="Petal.Width")
+
+```
+Na podstawie rysunków \ref{fig:boxplot_iris_Sepal.Length}, \ref{fig:boxplot_iris_Sepal.Width}, \ref{fig:boxplot_iris_Petal.Length} oraz \ref{fig:boxplot_iris_Petal.Width} stwierdziłam, że cechą o najlepszej zdolności dyskryminacyjnej jest ``Petal.Length``, a cechą o najgorszej – ``Sepal.Width``. Zatem do dyskretyzacji utworzę podzbiory tylko z tymi cechami.
+
+```{r wybranie_cech_iris}
+# Utworzenie odpowiednich podzbiorów
+najlepsza <- iris[,"Petal.Length"]
+najgorsza <- iris[,"Sepal.Width"]
+```
+
+Przed zastosowaniem dyskretyzacji przedstawię jeszcze dane wyjściowe na histogramach oraz wykresach rozrzutu.
+
+```{r histogramy_cech_iris_c, echo=FALSE, fig.cap="\\label{fig:histogramy_cech_iris}Histogramy dla wybranych cech"}
+# Kolory
+kolor.najlepsza="#A2B86B"
+kolor.najgorsza="#B17758"
+
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+hist(najlepsza, breaks=10, col=kolor.najlepsza, main="Najlepsza cecha")
+hist(najgorsza, breaks=10, col=kolor.najgorsza, main="Najgorsza cecha")
+```
+
+
+```{r wykresy_rozrzutu_cech_iris_c, echo=FALSE, fig.cap="\\label{fig:wykresy_rozrzutu_cech_iris}Wykresy rozrzutu dla wybranych cech"}
+# Losowa współrzędna Y do wykresu
+y <- runif(length(najlepsza))
+
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(najlepsza, y, col=kolor.najlepsza, pch=20, main="Najlepsza cecha")
+plot(najgorsza, y, col=kolor.najgorsza, pch=20, main="Najgorsza cecha")
+```
+
+## Dyskretyzacja z wykorzystaniem różnych metod
+\subsubsection{Metoda oparta na równych częstościach}
+Metoda ta jest oparta na staraniu się, aby do każdego przedziału trafiła taka sama liczba obiektów.
+
+```{r dyskretyzacja_equal_frequency}
+# Wykonanie dyskretyzacji
+najlepsza.frequency <- discretize(najlepsza, breaks=3) 
+najgorsza.frequency <- discretize(najgorsza, breaks=3)
+
+# Wyświetlenie tabel dla obu cech
+table(najlepsza.frequency)
+table(najgorsza.frequency)
+```
+
+Wyniki tej dyskretyzacji przedstawię także na wykresach – histogramach oraz wykresach rozrzutu.
+
+```{r dyskretyzacja_equal_frequency_histogramy_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_frequency_histogramy}Histogramy dla dyskretyzacji opartej na równych częstościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Histogramy
+hist(najlepsza, breaks = 10, main = "Najlepsza cecha", col=kolor.najlepsza)
+breaks.najlepsza.frequency <- attributes(najlepsza.frequency)$"discretized:breaks"
+abline(v = breaks.najlepsza.frequency, col = "red", lwd=3)
+
+hist(najgorsza, breaks = 10, main = "Najgorsza cecha", col=kolor.najgorsza)
+breaks.najgorsza.frequency <- attributes(najgorsza.frequency)$"discretized:breaks"
+abline(v = breaks.najgorsza.frequency, col = "red", lwd=3)
+```
+```{r dyskretyzacja_equal_frequency_wykresy_rozrzutu_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_frequency_wykresy_rozrzutu}Wykresy rozrzutu dla dyskretyzacji opartej na równych częstościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(najlepsza, y, col=iris$Species, main = "Najlepsza cecha")
+abline(v = breaks.najlepsza.frequency, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+
+plot(najgorsza, y, col=iris$Species, main = "Najgorsza cecha")
+abline(v = breaks.najgorsza.frequency, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+```
+Na rysunku&nbsp;\ref{fig:dyskretyzacja_equal_frequency_wykresy_rozrzutu} łatwo zauważyć, że dyskretyzacja dla najlepszej cechy dała istotnie lepsze rezultaty niż dla najgorszej.
+
+Wyznaczę jeszcze tabele dwudzielcze i współczynniki zgodności dla obu cech, aby ostatecznie ocenić skuteczność dyskretyzacji.
+
+```{r tabele_dwudzielcze_equal_frequency}
+# przypisanie tabel (będą użyte później)
+tab.najlepsza.frequency <- table(najlepsza.frequency, iris$Species)
+tab.najgorsza.frequency <- table(najgorsza.frequency, iris$Species)
+
+#Wyświetlenie tabel
+tab.najlepsza.frequency
+tab.najgorsza.frequency
+```
+Wyniki z tabel przedstawię również w formie graficznej na wykresach.
+
+```{r dyskretyzacja_equal_frequency_wykresy_tabel_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_frequency_wykresy_tabel}Wykresy zgodności dla dyskretyzacji opartej na równych częstościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(iris$Species~najlepsza.frequency, col=1:3, main="Najlepsza cecha")
+plot(iris$Species~najgorsza.frequency, col=1:3, main="Najgorsza cecha")
+```
+
+Rysunek&nbsp;\ref{fig:dyskretyzacja_equal_frequency_wykresy_tabel} potwierdza to, co pokazują tabele, że najlepsza cecha daje całkiem zadowalające efekty, natomiast najgorsza – niezbyt.
+
+```{r equal_frequency_współczynniki_zgodności}
+matchClasses(tab.najlepsza.frequency)
+matchClasses(tab.najgorsza.frequency)
+```
+Współczynniki zgodności potwierdzają to wszystko, ponieważ dla najlepszej cechy współczynnik zgodności wynosi ponad 95%.
+
+\subsubsection{Metoda oparta na równych szerokościach}
+Druga z metod dyskretyzacji polega na podzieleniu wartości na przedziały równej szerokości.
+
+```{r dyskretyzacja_equal_intervals}
+# Wykonanie dyskretyzacji
+najlepsza.interval <- discretize(najlepsza, method="interval", breaks=3) 
+najgorsza.interval <- discretize(najgorsza, method="interval", breaks=3)
+
+# Wyświetlenie tabel dla obu cech
+table(najlepsza.interval)
+table(najgorsza.interval)
+```
+
+Wyniki tej dyskretyzacji przedstawię także na wykresach – histogramach oraz wykresach rozrzutu.
+
+```{r dyskretyzacja_equal_intervals_histogramy_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_intervals_histogramy}Histogramy dla dyskretyzacji opartej na równych szerokościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Histogramy
+hist(najlepsza, breaks = 10, main = "Najlepsza cecha", col=kolor.najlepsza)
+breaks.najlepsza.interval <- attributes(najlepsza.interval)$"discretized:breaks"
+abline(v = breaks.najlepsza.interval, col = "red", lwd=3)
+
+hist(najgorsza, breaks = 10, main = "Najgorsza cecha", col=kolor.najgorsza)
+breaks.najgorsza.interval <- attributes(najgorsza.interval)$"discretized:breaks"
+abline(v = breaks.najgorsza.interval, col = "red", lwd=3)
+```
+```{r dyskretyzacja_equal_intervals_wykresy_rozrzutu_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_intervals_wykresy_rozrzutu}Wykresy rozrzutu dla dyskretyzacji opartej na równych szerokościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(najlepsza, y, col=iris$Species, main = "Najlepsza cecha")
+abline(v = breaks.najlepsza.interval, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+
+plot(najgorsza, y, col=iris$Species, main = "Najgorsza cecha")
+abline(v = breaks.najgorsza.interval, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+```
+Jak widać na rysunku&nbsp;\ref{fig:dyskretyzacja_equal_intervals_wykresy_rozrzutu}, dla najlepszej cechy dyskretyzacja te prezentuje się dość podobnie do tej względem równych częstości, natomiast znaczna różnica występuje dla najgorszej cechy.
+
+Wyznaczę jeszcze tabele dwudzielcze i współczynniki zgodności dla obu cech, aby ostatecznie ocenić skuteczność dyskretyzacji.
+
+```{r tabele_dwudzielcze_equal_intervals}
+# przypisanie tabel (będą użyte później)
+tab.najlepsza.interval <- table(najlepsza.interval, iris$Species)
+tab.najgorsza.interval <- table(najgorsza.interval, iris$Species)
+
+#Wyświetlenie tabel
+tab.najlepsza.interval
+tab.najgorsza.interval
+```
+Wyniki z tabel przedstawię również w formie graficznej na wykresach.
+
+```{r dyskretyzacja_equal_intervals_wykresy_tabel_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_equal_intervals_wykresy_tabel}Wykresy zgodności dla dyskretyzacji opartej na równych szerokościach dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(iris$Species~najlepsza.interval, col=1:3, main="Najlepsza cecha")
+plot(iris$Species~najgorsza.interval, col=1:3, main="Najgorsza cecha")
+```
+
+Jak wcześniej, rysunek&nbsp;\ref{fig:dyskretyzacja_equal_intervals_wykresy_tabel} potwierdza to, co pokazują tabele, że najlepsza cecha daje całkiem zadowalające efekty, natomiast najgorsza – niezbyt.
+
+```{r equal_intervals_współczynniki_zgodności}
+matchClasses(tab.najlepsza.interval)
+matchClasses(tab.najgorsza.interval)
+```
+
+\subsubsection{Metoda oparta na algorytmie grupowania}
+Trzecią metodą dyskretyzacji jest dyskretyzacja przy zastosowaniu algorytmu grupowania (klasteryzacji) k-means.
+
+```{r dyskretyzacja_cluster}
+# Wykonanie dyskretyzacji
+najlepsza.cluster <- discretize(najlepsza, method="cluster", breaks=3) 
+najgorsza.cluster <- discretize(najgorsza, method="cluster", breaks=3)
+
+# Wyświetlenie tabel dla obu cech
+table(najlepsza.cluster)
+table(najgorsza.cluster)
+```
+
+Wyniki tej dyskretyzacji przedstawię także na wykresach – histogramach oraz wykresach rozrzutu.
+
+```{r dyskretyzacja_cluster_histogramy_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_cluster_histogramy}Histogramy dla dyskretyzacji k-means dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Histogramy
+hist(najlepsza, breaks = 10, main = "Najlepsza cecha", col=kolor.najlepsza)
+breaks.najlepsza.cluster <- attributes(najlepsza.cluster)$"discretized:breaks"
+abline(v = breaks.najlepsza.cluster, col = "red", lwd=3)
+
+hist(najgorsza, breaks = 10, main = "Najgorsza cecha", col=kolor.najgorsza)
+breaks.najgorsza.cluster <- attributes(najgorsza.cluster)$"discretized:breaks"
+abline(v = breaks.najgorsza.cluster, col = "red", lwd=3)
+```
+```{r dyskretyzacja_cluster_wykresy_rozrzutu_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_cluster_wykresy_rozrzutu}Wykresy rozrzutu dla dyskretyzacji k-means dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(najlepsza, y, col=iris$Species, main = "Najlepsza cecha")
+abline(v = breaks.najlepsza.cluster, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+
+plot(najgorsza, y, col=iris$Species, main = "Najgorsza cecha")
+abline(v = breaks.najgorsza.cluster, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+```
+Na rysunku&nbsp;\ref{fig:dyskretyzacja_cluster_wykresy_rozrzutu} można dostrzec, że dla najlepszej cechy dyskretyzacja dość różni się od poprzednich metod, natomiast dla najgorszej nieco przypomina tę opartą na równych szerokościach.
+
+Wyznaczę jeszcze tabele dwudzielcze i współczynniki zgodności dla obu cech, aby ostatecznie ocenić skuteczność dyskretyzacji.
+
+```{r tabele_dwudzielcze_cluster}
+# przypisanie tabel (będą użyte później)
+tab.najlepsza.cluster <- table(najlepsza.cluster, iris$Species)
+tab.najgorsza.cluster <- table(najgorsza.cluster, iris$Species)
+
+#Wyświetlenie tabel
+tab.najlepsza.cluster
+tab.najgorsza.cluster
+```
+Wyniki z tabel przedstawię również w formie graficznej na wykresach.
+
+```{r dyskretyzacja_cluster_wykresy_tabel_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_cluster_wykresy_tabel}Wykresy zgodności dla dyskretyzacji k-means dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(iris$Species~najlepsza.cluster, col=1:3, main="Najlepsza cecha")
+plot(iris$Species~najgorsza.cluster, col=1:3, main="Najgorsza cecha")
+```
+
+Rysunek&nbsp;\ref{fig:dyskretyzacja_cluster_wykresy_tabel} oraz wcześniejsze tabele pokazują, że ta metoda daje bardzo dobre wyniki dla dwóch gatunków irysów dla najlepszej cechy, źle natomiast rozdziela trzeci z nich, za to dyskretyzacja dla najgorszej cechy nie daje zbyt zadowalających efektów.
+
+Ostatnią rzeczą do wyznaczenia są współczynniki zgodności.
+
+```{r cluster_współczynniki_zgodności}
+matchClasses(tab.najlepsza.cluster)
+matchClasses(tab.najgorsza.cluster)
+```
+
+\subsubsection{Metoda z przedziałami zadanymi przez użytkownika}
+Ostatnia z metod polega na ręcznym zadaniu przedziałów do dyskretyzacji. Dla najlepszej metody zadam przedziały od minus nieskończoności do 2, od 2 do 5 i od 5 do nieskończoności, natomiast dla najgorszej – od minus nieskończoności do 3, od 3 do 3,3 i od 3,3 do nieskończoności.
+
+```{r dyskretyzacja_fixed}
+# Wykonanie dyskretyzacji
+najlepsza.fixed <- discretize(najlepsza, method="fixed", breaks = c(-Inf, 2, 5, Inf), labels = c("small","medium", "large")) 
+najgorsza.fixed <- discretize(najgorsza, method="fixed", breaks = c(-Inf, 3, 3.3, Inf), labels = c("small","medium", "large"))
+
+# Wyświetlenie tabel dla obu cech
+table(najlepsza.fixed)
+table(najgorsza.fixed)
+```
+
+Wyniki tej dyskretyzacji przedstawię także na wykresach – histogramach oraz wykresach rozrzutu.
+
+```{r dyskretyzacja_fixed_histogramy_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_fixed_histogramy}Histogramy dla dyskretyzacji według własnych przedziałów dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Histogramy
+hist(najlepsza, breaks = 10, main = "Najlepsza cecha", col=kolor.najlepsza)
+breaks.najlepsza.fixed <- attributes(najlepsza.fixed)$"discretized:breaks"
+abline(v = breaks.najlepsza.fixed, col = "red", lwd=3)
+
+hist(najgorsza, breaks = 10, main = "Najgorsza cecha", col=kolor.najgorsza)
+breaks.najgorsza.fixed <- attributes(najgorsza.fixed)$"discretized:breaks"
+abline(v = breaks.najgorsza.fixed, col = "red", lwd=3)
+```
+```{r dyskretyzacja_fixed_wykresy_rozrzutu_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_fixed_wykresy_rozrzutu}Wykresy rozrzutu dla dyskretyzacji według własnych przedziałów dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(najlepsza, y, col=iris$Species, main = "Najlepsza cecha")
+abline(v = breaks.najlepsza.fixed, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+
+plot(najgorsza, y, col=iris$Species, main = "Najgorsza cecha")
+abline(v = breaks.najgorsza.fixed, col = "red", lwd=3)
+legend(x = "topright", legend=levels(iris$Species), col=1:3, pch=21, bg = "azure")
+```
+Jak widać na rysunku&nbsp;\ref{fig:dyskretyzacja_fixed_wykresy_rozrzutu}, dla dobranych przedziałów dyskretyzacja ta przypomina nieco tę opartą na równych częstościach.
+
+Wyznaczę jeszcze tabele dwudzielcze i współczynniki zgodności dla obu cech, aby ostatecznie ocenić skuteczność dyskretyzacji.
+
+```{r tabele_dwudzielcze_fixed}
+# przypisanie tabel (będą użyte później)
+tab.najlepsza.fixed <- table(najlepsza.fixed, iris$Species)
+tab.najgorsza.fixed <- table(najgorsza.fixed, iris$Species)
+
+#Wyświetlenie tabel
+tab.najlepsza.fixed
+tab.najgorsza.fixed
+```
+Wyniki z tabel przedstawię również w formie graficznej na wykresach.
+
+```{r dyskretyzacja_fixed_wykresy_tabel_c, echo=FALSE, fig.cap="\\label{fig:dyskretyzacja_fixed_wykresy_tabel}Wykresy zgodności dla dyskretyzacji według własnych przedziałów dla najlepszej i najgorszej cechy"}
+# Marginesy
+par(mfrow = c(1, 2))
+
+# Wykresy
+plot(iris$Species~najlepsza.fixed, col=1:3, main="Najlepsza cecha")
+plot(iris$Species~najgorsza.fixed, col=1:3, main="Najgorsza cecha")
+```
+
+Rysunek&nbsp;\ref{fig:dyskretyzacja_fixed_wykresy_tabel} potwierdza to, co pokazują tabele, że najlepsza cecha daje całkiem zadowalające efekty, natomiast najgorsza – niezbyt, nawet pomimo ręcznego dobierania przedziałów.
+
+```{r fixed_współczynniki_zgodności}
+matchClasses(tab.najlepsza.fixed)
+matchClasses(tab.najgorsza.fixed)
+```
+
+## Wnioski
+Porównując wszystkie metody dyskretyzacji, można stwierdzić, że dla najlepszej cechy najlepsze okazały się algorytmy oparte na równych częstotliwościach i k-means, natomiast drugie w kolejności okazały się algorytmy oparte na równych szerokościach i o przedziałach zadanych przez użytkownika (z tymi konkretnymi przedziałami). Dla wszystkich tych algorytmów współczynniki zgodności wynoszą ponad 90% i dla wszystkich metod dyskretyzacji są bardzo podobne.
+
+Natomiast dla najgorszej cechy współczynniki zgodności są bardziej zróżnicowane, lecz wszystkie mieszczą się w przedziale 50–60%. Najlepszy okazał się algorytm z przedziałami zadanymi przez użytkownika, następnie po kolei k-means i równe częstotliwości, natomiast najgorszy z algorytmów, zadający przedziały o równej szerokości, okazał się najgorszy i istotnie gorszy od algorytmu równych częstotliwości (o prawie 5 punktów procentowych).
+
+Oczywiście wyniki dla najlepszej cechy różnią się istotnie od wyników dla najgorszej cechy – wszystkie przetestowane metody dyskretyzacji pokazują, że zdecydowanie bardziej opłaca się je stosować dla cech o dobrej zdolności dyskryminacyjnej, gdyż ich dyskretyzacja sensownie dzieli gatunki. Natomiast dyskretyzacja dla najgorszej cechy ma skuteczność w okolicy 50%, dlatego wykorzystanie tej cechy stanowi niezbyt dobry pomysł.
+
+Na koniec zadania odłączam także dla porządku dane iris.
+```{r dane_iris_koniec}
+# Odłączenie danych iris (dla porządku)
+detach(iris)
+```
+
+# Analiza składowych głównych (PCA – Principal Component Analysis)
+W tej części niniejszego raportu przedstawię analizę składową głównych.
+
+## Wykorzystane metody
+Metody, które wykorzystam, to:
+
+* wyznaczenie składowych głównych i ich analiza (PCA),
+* badanie wariancji i wyjaśnionej wariancji, aby wyjaśnić jak najwięcej zmienności danych,
+* narzędzia graficzne (wykresy) do prezentacji i analizy wyników.
+
+## Opis danych
+Dane analizowane w tej części to City Quality Of Life Dataset, czyli dane opisujące jakosć życia w poszczególnych miastach. Wszystkie cechy ilościowe przyjmują wartości z przedziału 0–10, gdzie większa wartość oznacza lepszy wynik.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Nazwa}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+X & Liczbowa & Identyfikator miasta \\
+\hline
+UA\_Name & Jakościowa & Nazwa miasta \\
+\hline
+UA\_Country & Jakościowa & Kraj \\
+\hline
+UA\_Continent & Jakościowa & Kontynent \\
+\hline
+Housing & Liczbowa & Warunki mieszkaniowe \\
+\hline
+Cost.of.Living & Liczbowa & Koszt utrzymania \\
+\hline
+Startups & Liczbowa & Startupy \\
+\hline
+Venture.Capital & Liczbowa & Inwestycje w młode przedsiębiorstwa \\
+\hline
+Travel.Connectivity & Liczbowa & Połączenia komunikacyjne \\
+\hline
+Commute & Liczbowa & Dojazd \\
+\hline
+Business.Freedom & Liczbowa & Wolność biznesowa \\
+\hline
+Safety & Liczbowa & Bezpieczeństwo \\
+\hline
+Healthcare & Liczbowa & Opieka zdrowotna \\
+\hline
+Education & Liczbowa & Edukacja \\
+\hline
+Environmental.Quality & Liczbowa & Jakość środowiska \\
+\hline
+Economy & Liczbowa & Ekonomia \\
+\hline
+Taxation & Liczbowa & Opodatkowanie \\
+\hline
+Internet.Access & Liczbowa & Dostęp do Internetu \\
+\hline
+Leisure...Culture & Liczbowa & Kultura czasu wolnego \\
+\hline
+Tolerance & Liczbowa & Tolerancja \\
+\hline
+Outdoors & Liczbowa & Plener \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych City Quality Of Life Dataset}
+\label{opis_cech_2}
+\end{table}
+
+W tabeli&nbsp;\ref{opis_cech_2} znajduje się wykaz i opis poszczególnych cech.
+
+## Przygotowanie danych
+Pierwszym krokiem jest przygotowanie danych. Na samym początku wczytam dane oraz wybiorę podzbiór zawierający wyłącznie dane liczbowe (poza identyfikatorem, oczywiście). Utworzymy także zbiór, na którym wykorzystano standaryzację, aby w późniejszej części sprawdzić, czy standaryzacja ma istotny wpływ na wyniki analizy.
+
+```{r dane_city}
+# Wczytanie danych
+city <- read.csv(file="uaScoresDataFrame.csv", stringsAsFactors=TRUE)
+
+# Wybranie podzbioru z wartościami numerycznymi
+city.main <- city[,5:21]
+
+# Standaryzacja
+city.main.scaled <- scale(city.main, center=TRUE, scale=TRUE)
+
+```
+
+Wszystkie dane wczytały się poprawnie, więc nie ma konieczności zamiany typów danych. Następnie porównam zmienność poszczególnych cech przed standaryzacją i po niej.
+
+```{r boxplot_city_c, echo=FALSE, fig.cap="\\label{boxplot_city}Wykresy pudełkowe dla cech liczbowych city"}
+# Margines
+par(mar=c(10,2,4,2))
+
+# Wykres
+boxplot(city.main, las=2, col=rainbow(17), main="Wykresy pudełkowe dla poszczególnych zmiennych liczbowych")
+```
+
+```{r boxplot_city_std_c, echo=FALSE, fig.cap="\\label{boxplot_city_std}Wykresy pudełkowe dla cech liczbowych city po standaryzacji"}
+# Margines
+par(mar=c(10,2,4,2))
+
+# Wykres
+boxplot(city.main.scaled, las=2, col=rainbow(17), main="Wykresy pudełkowe dla poszczególnych zmiennych liczbowych po standaryzacji")
+```
+
+## Wyznaczenie składowych głównych
+Następnym krokiem jest wyznaczenie składowych głównych.
+
+```{r pca}
+# Wyznaczenie składowych głównych dla wersji zwykłej i ustandaryzowanej
+city.main.pca <- prcomp(city.main, retx=T, center=T)
+city.main.scaled.pca <- prcomp(city.main.scaled, retx=T, center=T)
+```
+
+Teraz dla obu wersji przeanalizuję wektory ładunków pierwszych trzech głównych składowych.
+
+```{r pca_loadings}
+# Wyświetlenie wektorów ładunków dla danych nieustandaryzowanych
+city.main.pca$rotation[,1:3]
+```
+Dla danych nieustandaryzowanych można zauważyć następujące własności tych składowych:
+
+* PC1 największą uwagę zwraca na warunki mieszkaniowe i koszty utrzymania, co się oczywiście naturalnie ze sobą łączy,
+* PC2 zwraca uwagę na zmienne Startups i Venture.Capital, więc mówi przede wszystkim o warunkach dla startujących przedsiębiorstw,
+* PC3 poza warunkami mieszkaniowymi i kosztami utrzymania sporą wagę kładzie na połączenia transportowe i dojazd do pracy, więc mówi nie tylko o samych warunkach mieszkania, ale też o lokalizacji.
+
+Taką samą analizę wykonam dla danych ustandaryzowanych.
+```{r pca_scaled_loadings}
+# Wyświetlenie wektorów ładunków dla danych ustandaryzowanych
+city.main.scaled.pca$rotation[,1:3]
+```
+Wnioski, które można wyciągnąć, są następujące:
+
+* PC1, jak wcześniej, zwraca sporą uwagę na warunki mieszkaniowe i koszt utrzymania,
+* PC2 natomiast największą wagę przypisuje tolerancji, bezpieczeństwu, warunkom środowiskowim i opiece zdrowotnej; można powiedzieć, że zwraca uwag na dobry stan człowieka jako jednostki,
+* PC3 największą wagę przypisuje zmiennej Economy – zwraca więc uwagę na aspekty ekonomiczne.
+
+Tak więc standaryzacja ma wpływ na wektory ładunków poszczególnych składowych głównych – sprawia, że poszczególne składowe są bardziej różnorodne.
+
+## Zmienność poszczególnych składowych
+Następnym krokiem jest sprawdzenie zmienności odpowiadającej poszczególnym składowym. Na tej podstawie odpowiem, ile składowych trzeba, by wyjaśnić odpowiednio 80% i 90% całkowitej zmienności danych.
+
+```{r wariancja_city}
+# Wyświetlenie informacji o wyjaśnionej wariancji
+summary(city.main.pca)
+summary(city.main.scaled.pca)
+```
+W obu przypadkach do wyjaśnienia 80% całkowitej zmienności danych potrzeba 7 składowych głównych, a do wyjaśnienia 90% – 10.
+
+## Wizualizacja danych
+Następnym krokiem jest przedstawienie danych dla obu wersji na wykresach rozrzutu.
+
+```{r wykres_rozrzutu_pca_c, echo=FALSE, fig.cap="\\label{fig:wykres_rozrzutu_pca}Wykres rozrzutu 2D dla analizy składowych głównych (wersja nieustandaryzowana)"}
+# Zmienna dla kolorów
+kolory <- rainbow(6)
+
+# Wykres
+par(mar=c(1,2,2,8), xpd=TRUE)
+plot(city.main.pca$x[,1], city.main.pca$x[,2], col=kolory[as.numeric(city$UA_Continent)], pch=20, xlab="PC1", ylab="PC2", cex=1.2)
+text(city.main.pca$x[,1], city.main.pca$x[,2]+0.3, labels=city$X, cex=0.4)
+title("Rozrzut – dane nieustandaryzowane")
+legend("topright", inset=c(-0.5,0), legend=levels(city$UA_Continent), col=kolory, pch=16,bg="azure2", xpd=TRUE)
+```
+
+```{r wykres_rozrzutu_pca_scaled_c, echo=FALSE, fig.cap="\\label{fig:wykres_rozrzutu_pca_scaled}Wykres rozrzutu 2D dla analizy składowych głównych (wersja ustandaryzowana)"}
+# Wykres
+par(mar=c(2,2,2,8), xpd=TRUE)
+plot(city.main.scaled.pca$x[,1], city.main.scaled.pca$x[,2], col=kolory[as.numeric(city$UA_Continent)], pch=20, xlab="PC1", ylab="PC2", cex=1.2)
+title("Rozrzut – dane ustandaryzowane")
+text(city.main.scaled.pca$x[,1], city.main.scaled.pca$x[,2]+0.3, labels=city$X, cex=0.4)
+legend("topright", inset=c(-0.5,0), legend=levels(city$UA_Continent), col=kolory, pch=16,bg="azure2", xpd=TRUE)
+```
+Łatwo można zauważyć, że dane na rysunkach&npsp;\ref{fig:wykres_rozrzutu_pca} oraz \ref{fig:wykres_rozrzutu_pca_scaled} różnią się przede wszystkim tym, że te ustandaryzowane są odwrócone pionowo względem tych nieustandaryzowanych. Dane odrobinę tworzą skupiska, lecz nie całkowicie – sporo z nich jest rozproszonych. W jednym miejscu, po prawej stronie wykresu, znajdują się miasta Ameryki Południowej, Afryki oraz sporo miast azjatyckich, natomiast drugą główną grupę, po lewej, stanowią Europa, Ameryka Północna i Oceania. Część miast azjatyckich wpada do grupy lewej, natomiast do prawej wpada część miast Europy i Ameryki Północnej. 
+
+Aby wyciągnąć ostateczne wnioski, utworzę jeszcze jeden wykres, tym razem przypisujący punktom nazwy państw.
+
+```{r wykres_rozrzutu_pca2_c, echo=FALSE, fig.cap="\\label{fig:wykres_rozrzutu2_pca}Wykres rozrzutu 2D dla analizy składowych głównych (wersja nieustandaryzowana), ale z nazwami państw"}
+# Zmienna dla kolorów
+kolory <- rainbow(6)
+
+# Wykres
+par(mar=c(2,2,2,8), xpd=TRUE)
+plot(city.main.pca$x[,1], city.main.pca$x[,2], col=kolory[as.numeric(city$UA_Continent)], pch=20, xlab="PC1", ylab="PC2", cex=1.2)
+title("Rozrzut – nazwy miast")
+text(city.main.pca$x[,1], city.main.pca$x[,2]+0.3, labels=city$UA_Country, cex=0.4)
+legend("topright", inset=c(-0.5,0), legend=levels(city$UA_Continent), col=kolory, pch=16,bg="azure2", xpd=TRUE)
+```
+Ten wykres ostatecznie potwierdza obserwację, że skupisko po lewej to głównie rozwinięte kraje Zachodu oraz bardziej rozwinięte kraje azjatyckie, takie jak Japonia. Natomiast skupisko po prawej to głównie kraje mniej rozwinięte, w tym kraje Europy nie należące do Unii Europejskiej.
+
+Można zauważyć też trzy obszary obserwacji odbiegających. Pierwszy z nich to lewy górny róg z miastami z państw takich jak Wielka Brytania (Londyn) czy Francja (Paryż) i ze stanów Nowy Jork i Kalifornia – są to wszystko obszary dobrze rozwinięte. Po lewej stronie, ale nieco niżej, odbiega też część obserwacji ze Szwajcarii.
+
+Uwagę zwraca też drugi obszar przy górnym brzegu wykresu z obserwacjami z Chin i Indii, czyli krajów cechujących się szczególnie wysoką gęstością zaludnienia. Są to przede wszystkim największe miasta tych krajów, takie jak Szanghaj, Pekin czy Delhi.
+
+Ostatnim takim obszarem godnym wyróżnienia jest prawy dolny róg wykresu, z miastami z krajów słabo rozwiniętych i/lub komunistycznych, takich jak Kuba czy Boliwia, a także z małych krajów, takich jak Andora.
+
+## Korelacja zmiennych
+Ostatnim krokiem przed wyciągnięciem ostatecznych wniosków jest zbadanie korelacji zmiennych. Ze względu na dużą liczbę zmiennych dwuwykres daje zbyt nieczytelne wyniki, zatem wykorzystam koło korelacji.
+
+```{r kolo_korelacji_c, echo=FALSE, fig.cap="\\label{fig:kolo_korelacji}Koło korelacji dla danych nieustandaryzowanych"}
+fviz_pca_var(city.main.pca, col.var="black", labelsize=4, repel=TRUE)  
+```
+
+```{r kolo_korelacji_scaled_c, echo=FALSE, fig.cap="\\label{fig:kolo_korelacji_scaled}Koło korelacji dla danych ustandaryzowanych"}
+fviz_pca_var(city.main.scaled.pca, col.var="black", labelsize=4, repel=TRUE)
+```
+Rysunki&nbsp;\ref{fig:kolo_korelacji} oraz \ref{fig:kolo_korelacji_scaled} pokazują dość podobne wyniki, jednak w większości „odwrócone” względem poziomej osi. Na obu widać, że dość blisko siebie są zmienne Housing i Cost.of.Living, natomiast większość pozostałych zmiennych znajduje się blisko siebie nawzajem i daleko od tamtych dwóch. Porównam te wyniki z macierzą korelacji, którą dla większej czytelności również zwizualizuję na wykresie.
+
+```{r macierz_korelacji_c, echo=FALSE, fig.cap="\\label{fig:macierz_korelacji}Wizualizacja macierzy korelacji"}
+correlation.matrix <- cor(city.main)
+corrplot(correlation.matrix, tl.cex=0.8, title="Wizualizacja macierzy korelacji zmiennych z danych city", mar=c(0,0,2,0))
+```
+Rysunek&nbsp;\ref{fig:macierz_korelacji} potwierdza ogólny wniosek o tym, że zmienne Housing i Cost.of.Living są „dalej” od reszty zmiennych, a między większością pozostałych jest dodatnia korelacja.
+
+## Wnioski
+Na podstawie obserwacji można wyciągnąć kilka wniosków.
+
+1. Zwykle koszty utrzymania idą w parze z warunkami mieszkaniowymi, podobnie startupy idą w parze z venture. Istnieje jeszcze jedna grupa dość powiązanych zmiennych: wolność biznesowa, opieka zdrowotna, edukacja, jakość środowiska, ekonomia i, w nieco mniejszej mierze, dostęp do Internetu. Poza tym odrobinę uwagę zwraca koleracja zmiennych mówiących o tolerancji i jakości środowiska.
+2. Obserwacje naturalnie układają się w dwie grupy krajów rozwiniętych oraz rozwijających się.
+3. Do otrzymania zadowalającej reprezentacji danych potrzebujemy przynajmniej siedmiu składowych głównych, czyli liczby odpowiadającej prawie połowie wszystkich zmiennych.
+4. Standaryzacja danych w tym przypadku na ogół nie miała istotnego wpywu na wyniki (co jest spowodowane tym, że już oryginalne dane były na tej samej skali), czasami nawet nieco utrudniła odczytanie wyników. Jedyną istotną różnicę stanowiła w przypadku interpretacji ładunków składowych głównych, gdzie dane ustandaryzowane dały większą różnorodność w interpretacji trzech pierwszych składowych głównych.
+
+# Skalowanie wielowymiarowe (MDS – Multidimensional Scaling)
+W ostatniej części raportu omówię skalowanie wielowymiarowe.
+
+## Wykorzystane metody
+Metody, które będę stosować w tej części, to:
+
+* macierz odmienności,
+* skalowanie wielowymiarowe (MDS),
+* diagram Sheparda,
+* graficzna prezentacja wyników na wykresach.
+
+## Przygotowanie i opis danych
+Dane, na których będę pracować w tej części to ``titanic`` z pakietu o tej samej nazwie. W trakcie wstępnej obróbki zmieniłam na typ factor zmienne, które wczytały się jako chr, a także te, których wartości są liczbami, ale powinno się je odczytywać jako zmienne jakościowe (tj. Survived, gdzie 0 – fałsz, 1 – prawda oraz Pclass, gdzie cyfra oznacza numer klasy). Usunęłam także zmienne służące za identyfikatory (PassengerID, Name, Ticket, Cabin).
+
+```{r titanic_przygotowanie_danych}
+# Wczytanie danych
+titanic <- titanic_train
+
+# Zamiana typów zmiennych, które się błędnie wczytały
+titanic$Sex <- as.factor(titanic$Sex)
+titanic$Pclass <- as.factor(titanic$Pclass)
+titanic$Embarked <- as.factor(titanic$Embarked)
+titanic$Survived <- as.factor(titanic$Survived)
+
+# Usunięcie zbędnych zmiennych (identyfikatorów)
+titanic <- titanic[c(2:3, 5:8, 10, 12)]
+
+# Utworzenie podzbioru pomijającego zmienną Survived (ten będę skalować)
+titanic.to.scale=titanic[,2:8]
+```
+
+Po wstępnej obróbce mogę opisać dokładniej dane.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Nazwa}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+Survived & Jakościowa & Czy dana osoba przetrwała katastrofę \\
+\hline
+Pclass & Jakościowa & Klasa \\
+\hline
+Sex & Jakościowa & Płeć \\
+\hline
+Age & Liczbowa & Wiek \\
+\hline
+SibSp & Liczbowa & Liczba rodzeństwa/partnerów na statku \\
+\hline
+Parch & Liczbowa & Liczba rodziców/dzieci na statku \\
+\hline
+Fare & Liczbowa & Cena biletu \\
+\hline
+Embarked & Jakościowa & Miejsce wejścia na pokład \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych titanic}
+\label{opis_cech_3}
+\end{table}
+
+W tabeli&nbsp;\ref{opis_cech_3} znajduje się opis danych titanic już po usunięciu zmiennych identyfikacyjnych.
+
+## Redukcja wymiaru
+Następnym krokiem jest redukcja wymiaru danych, aby było je łatwiej zwizualizować. Na początku wyznaczę macierz odmienności, by następnie przeskalować dane.
+
+```{r dissimilarity_matrix}
+# Wyznaczenie macierzy odmienności
+dissimilarities <- daisy(titanic.to.scale, type=list(), stand=T)
+dis.matrix <- as.matrix(dissimilarities)
+```
+
+Po wyznaczeniu tej macierzy zwizualizuję ją w postaci mapy cieplnej.
+
+```{r dissimilarity_matrix_heatmap_c, echo=FALSE, fig.cap="\\label{fig:dissimilarity_matrix_heatmap}Mapa cieplna dla macierzy odmienności danych titanic"}
+# Wygenerowanie wykresu
+heatmap.2(dis.matrix, scale = "none", col = heat.colors, 
+          trace = "none", density.info = "none")
+```
+Kolejnym krokiem będzie przeskalowanie tych danych. Jako wymiar docelowej przestrzeni przyjmę $d = 2$.
+
+```{r skalowanie}
+# Przeskalowanie
+mds.k2 <- cmdscale(dis.matrix, k=2)
+
+# Wyznaczenie odległości euklidesowych w nowej przestrzeni
+dist.mds.k2 <- dist(mds.k2, method="euclidean")
+dist.mds.k2 <- as.matrix(dist.mds.k2)
+```
+
+Nowe odległości również przedstawię na mapie cieplnej.
+
+```{r mds_matrix_heatmap_c, echo=FALSE, fig.cap="\\label{fig:mds_matrix_heatmap}Mapa cieplna dla macierzy odmienności przeskalowanych danych titanic"}
+# Wygenerowanie wykresu
+heatmap.2(mds.k2, scale = "none", col = heat.colors, 
+          trace = "none", density.info = "none")
+```
+
+Kolejnym krokiem będzie zbadanie jakości odwzorowania przy pomocy diagramu Sheparda.
+
+```{r Shepard_c, echo=FALSE, fig.cap="\\label{fig:Shepard}Diagram Sheparda dla przeskalowanych danych titanic"}
+# diagram Sheparda
+plot(dis.matrix,dist.mds.k2, main="diagram Sheparda", cex=0.5, xlab="Oryginalny dystans", ylab="Dystans po użyciu MDS")
+abline(coef=c(0,1), col="red", lty=2, lwd=2) # przekątna
+```
+Rysunek&nbsp;\ref{fig:Shepard} pokazuje, że odwzorowanie pozostawia wiele do życzenia, choć dane i tak są skupione blisko siebie, więc nie jest aż tak źle.
+
+## Wizualizacja danych
+Ostatnim etapem tej analizy będzie wizualizacja danych z podziałem na poszczególne grupy. W pierwszej kolejności zwizualizuję dane względem tego, czy dana osoba przetrwała katastrofę, czy też nie.
+
+```{r plot_survived_c, echo=FALSE, fig.cap="\\label{fig:plot_survived}Wykres rozrzutu dla przeskalowanych danych titanic z podziałem względem zmiennej Survived"}
+kolory2 <- rainbow(2)
+
+plot(mds.k2[,1], mds.k2[,2], col=kolory2[as.numeric(titanic$Survived)], pch=20, xlab="V1", ylab="V2", cex=1.2)
+
+title("Dane titanic -  wykres rozrzutu 2D (Survived)")
+legend("topright",legend=c("No", "Yes"), col=kolory2, pch=16,bg="azure2")
+```
+Na rysunku&nbsp;\ref{fig:plot_survived} łatwo można zauważyć dwa skupiska, któe w pewnym stopniu pokrywają się z informacją na temat przeżycia katastrofy, jednak nie w pełni – grupy częściowo się mieszają. Występują pojedyncze obserwacje odstające – najbardziej rzuca się w oczy czerwona kropka najdalej na prawo.
+
+Dalej sprawdzę jeszcze wyniki względem płci pasażerów oraz ich klasy.
+
+```{r plot_sex_c, echo=FALSE, fig.cap="\\label{fig:plot_sex}Wykres rozrzutu dla przeskalowanych danych titanic z podziałem względem zmiennej Sex"}
+plot(mds.k2[,1], mds.k2[,2], col=kolory2[as.numeric(titanic$Sex)], pch=20, xlab="V1", ylab="V2", cex=1.2)
+
+title("Dane titanic -  wykres rozrzutu 2D (Sex)")
+legend("topright",legend=levels(titanic$Sex), col=kolory2, pch=16,bg="azure2")
+```
+Rysunek&nbsp;\ref{fig:plot_sex} pokazuje, że skupiska są związane przede wszystkim z płcią – skupisko po lewej jest skupiskiem kobiet, natomiast skupisko po prawej to mężczyźni.
+
+```{r plot_pclass_c, echo=FALSE, fig.cap="\\label{fig:plot_pclass}Wykres rozrzutu dla przeskalowanych danych titanic z podziałem względem zmiennej Pclass"}
+kolory3=rainbow(3)
+
+plot(mds.k2[,1], mds.k2[,2], col=kolory3[as.numeric(titanic$Pclass)], pch=20, xlab="V1", ylab="V2", cex=1.2)
+
+title("Dane titanic -  wykres rozrzutu 2D (Pclass)")
+legend("topright",legend=levels(titanic$Pclass), col=kolory3, pch=16,bg="azure2")
+```
+Jeśli chodzi o klasę, rysunek&nbsp;\ref{fig:plot_pclass} pokazuje względnie równomierne rozmieszczenie klas w obu skupiskach.
+
+## Wnioski
+W wizualizacji dancyh względem wybranych zmiennych widać, że wśród osób, które przetrwały katastrofę, były przede wszystkim kobiety – jest to zgodne z faktem, że najpierw ewakuowano kobiety i dzieci. Klasa, w której podróżowano, ma nieco mniejsze znaczenie, jednak można zauważyć, że wśród kobiet dużo mniej przetrwało tych, które były w klasie trzeciej. W przypadku mężczyzn również można zauważyć mniejszą liczbę osób, które przetrwały, wśród tych, które podrózowały w klasie trzeciej. Wynika to z faktu, że osoby z tej klasy miały utrudniony dostęp do ewakuacji.

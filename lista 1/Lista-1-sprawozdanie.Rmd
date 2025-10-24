@@ -1,0 +1,481 @@
+---
+title: "Sprawozdanie z listy 1"
+subtitle: "Eksploracja danych"
+author: "Daria Grzelak, album 277533"
+date: "`r Sys.Date()`"
+header-includes:
+   - \usepackage[OT4]{polski}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+```{r ustawienia, echo=FALSE}
+### Biblioteki ###
+library(rstudioapi) # do ustawienia working directory
+library(moments) # do odczytania współczynnika skośności
+library(kableExtra) # do tworzenia tabel
+
+### Ustawienie wd na obecny ###
+current_path=rstudioapi::getActiveDocumentContext()$path 
+setwd(dirname(current_path))
+
+### Wczytanie danych i ustawienia początkowe ###
+# Wczytanie pliku z danymi
+churn <- read.csv(file="WA_Fn-UseC_-Telco-Customer-Churn.csv", stringsAsFactors=TRUE)
+
+# Konwersja zmiennej SeniorCitizen na factor, ponieważ 0 i 1 określają tam fałsz i prawdę, a nie te wartości numeryczne
+churn$SeniorCitizen <- as.factor(churn$SeniorCitizen)
+
+```
+
+# Krótki opis zagadnienia
+
+Moim celem jest analiza danych o klientach pewnej firmy telekomunikacyjnej. Znajdują się w nich informacje o danych klientów i usługach, z których korzystają, a także informacja o tym, czy nadal korzystają z usług firmy, czy odeszli. Na podstawie przeprowadzonych analiz zamierzam odpowiedzieć na następujące pytania:
+
+* Co charakteryzuje klientów? Jakie różnice można zaobserwować pomiędzy klientami, którzy pozostali, a tymi, któzy odeszli?
+* Jakie działania powinna wprowadzić firma, aby zachęcić klientów do pozostania?
+
+# Opis analiz
+
+Aby znaleźć odpowiedzi na postawione pytania, wykorzystam metody analizy opisowej. Przeanalizuję rozkłady poszczególnych zmiennych (robiąc testy statystyczne, a także prezentując wyniki w formie graficznej), a także zbadam różnice w rozkładach poszczególnych zmiennych pomiędzy klientami, którzy odeszli, a tymi, którzy pozostali.
+
+## Opis danych
+Analizowane dane zawierają informacje o klientach firmy telekomunikacyjnej – mają `r ncol(churn)` cech oraz `r nrow(churn)` przypadki. W tabeli <link tu> znajduje się bardziej szczegółowy opis cech.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{p{0.25\linewidth}|p{0.13\linewidth}|p{0.62\linewidth}}
+\hline
+\textbf{Nazwa (oryginalna)}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+customerI & Jakościowa & Identyfikator klienta \\
+\hline
+gender & Jakościowa & Płeć klienta \\
+\hline
+SeniorCitizen & Jakościowa & Czy klient jest seniorem \\
+\hline
+Partner & Jakościowa & Czy klient ma partnera \\
+\hline
+Dependents & Jakościowa & Czy klient ma utrzymanków \\
+\hline
+tenure & Liczbowa & Jak długo klient korzysta z usług firmy (w miesiącach) \\
+\hline
+PhoneService & Jakościowa & Czy klient korzysta z usług telefonicznych \\
+\hline
+MultipleLines & Jakościowa & Czy klient ma wiele linii telefonicznych \\
+\hline
+InternetService & Jakościowa & Czy klient korzysta z usługi internetowej \\
+\hline
+OnlineSecurity & Jakościowa & Czy klient korzysta z usługi bezpieczeństwa online \\
+\hline
+OnlineBackup & Jakościowa & Czy klient korzysta z usługi kopii zapasowej \\
+\hline
+DeviceProtection & Jakościowa & Czy klient korzysta z usługi ochrony urządzenia \\
+\hline
+TechSupport & Jakościowa & Czy klient korzysta ze wsparcia technicznego \\
+\hline
+StreamingTV & Jakościowa & Czy klient posiada telewizję streamingową \\
+\hline
+StreamingMovies & Jakościowa & Czy klient korzysta ze streamingu filmów \\
+\hline
+Contract & Jakościowa & Typ umowy (miesięczna, roczna, dwuletnia) \\
+\hline
+PaperlessBilling & Jakościowa & Czy klient rozlicza się przez rachunki bez użycia papieru \\
+\hline
+PaymentMethod & Jakościowa & W jaki sposób klient opłąca rachunki \\
+\hline
+MonthlyCharges & Liczbowa & Kwota, którą klient płaci miesięcznie \\
+\hline
+TotalCharges & Liczbowa & Łączna kwota, którą klient płaci \\
+\hline
+Churn & Jakościowa & Czy klient odszedł w ciągu ostatniego miesiąca \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych}
+\label{opis_cech}
+\end{table}
+
+Z tabeli&nbsp;\ref{fig:opis_cech} widać, że cecha CustomerID pełni funkcję identyfikatora klienta. Będzie zbędna w dalszej analizie, zatem ją usunę.
+
+
+```{r id, echo=FALSE}
+# Usunięcie z danych zmiennej CustomerID, ponieważ jest ona zbędnym identyfikatorem klienta
+churn<-churn[,-1]
+
+# Attach obiektu churn, by mieć łatwiejszy dostęp do danych
+attach(churn)
+```
+
+Po usunięciu tej cechy pozostało nam `r ncol(churn)` cech.
+
+Dane w większości są jakościowe, numeryczne są tylko trzy cechy: tenure (liczba miesięcy, w których klient korzysta z usługi), MonthlyCharges (miesięczne opłaty) oraz TotalCharges (łączne opłaty).
+
+Sprawdzenie brakujących wartości daje natomiast następujący wynik:
+
+```{r missing_values}
+# Sprawdzenie i wyświetlenie, w których kolumnach występują
+# brakujące wartości
+colSums(is.na(churn))
+
+```
+
+Jak widać, jedyną kolumną, w której występują brakujące wartości, jest TotalCharges. Brakujące wartości w tej kolumnie są równoważne z wartością tenure równą 0, co udowadnia odpowiednie porównanie dwóch podzbiorów (są takie same).
+
+```{r NA_a_tenure}
+# Niekompletne obserwacje
+churn.incomplete <- churn[!complete.cases(churn),]
+# Wartości tenure dla niekompletnych obserwacji
+churn.incomplete$tenure
+# Obserwacje, dla których tenure jest równe 0
+churn.tenure0 <- subset(churn, subset=tenure==0)
+# Wartości TotalCharges dla obserwacji z tenure równym 0
+churn.tenure0$TotalCharges
+```
+
+Dalsza obserwacja danych wykazała, że nie występują nietypowe wartości, takie jak niestandardowe kodowania brakujących wartości.
+
+# Wyniki
+Najpierw dokonuję analizy ogólnej, bez podziału na klientów, którzy odeszli i którzy pozostali. W następnej części analiza zostaje dokonana na odpowiednich podzbiorach, przedstawionych w poniższym kodzie.
+
+```{r podzial}
+# Podział na podzbiory względem osób, które odeszły i które zostały
+churn.yes <- subset(churn, subset=Churn=="Yes")
+churn.no <- subset(churn, subset=Churn=="No")
+
+# usunięcie zmiennej churn z podzbiorów
+# (bo w każdym podzbiorze odpowiednio wartość ta jest taka sama)
+churn.yes <- churn.yes[,1:19]
+churn.no <- churn.no[,1:19]
+```
+
+## Zmienne liczbowe – analiza ogólna
+W analizowanych danych występują 3 zmienne liczbowe, dla których wyznaczamy podstawowe wskaźniki sumaryczne oraz wykresy rozkładu. Dla wszystkich korzystamy z histogramu, bo chociaż zmienna tenure jest dyskretna, możemy ją traktować jak ciągłą, ponieważ przyjmuje dużo wartości.
+
+```{r tabela_numeryczne_ogólna, echo=FALSE}
+# Własna funkcja podsumowująca (miary położenia i rozproszenia)
+podsumowanie <- function(X)
+{
+  wynik <- c(min(X),quantile(X,0.25), median(X), mean(X), quantile(X,0.75), max(X), var(X), sd(X), max(X)-min(X), IQR(X), skewness(X))
+  names(wynik) <- c("Min", "Q1", "Median", "Mean", "Q3", "Max", "Var", "SD", "R", "IQR", "Skewness")
+  return(wynik)
+}
+
+### Tabela podsumowań dla zmiennych liczbowych ###
+nazwy.wskaznikow <- names(podsumowanie(tenure))
+nazwy.zmiennych  <- c("tenure", "MonthlyCharges", "TotalCharges")
+tenure.podsumowanie <- as.vector(podsumowanie(tenure))
+MonthlyCharges.podsumowanie <- as.vector(podsumowanie(MonthlyCharges))
+TotalChargesComplete <- na.omit(TotalCharges) # utworzenie podzbioru TotalCharges omijającego wyniki NA
+TotalCharges.podsumowanie <- as.vector(podsumowanie(TotalChargesComplete))
+podsumowanie.matrix <- cbind(tenure.podsumowanie, MonthlyCharges.podsumowanie,  TotalCharges.podsumowanie)
+colnames(podsumowanie.matrix) <- nazwy.zmiennych
+row.names(podsumowanie.matrix)  <- nazwy.wskaznikow
+
+podsumowanie.matrix %>% 
+  kbl(caption="Podstawowe wskaźniki sumaryczne dla zmiennnych tenure, MonthlyCharges oraz TotalCharges", format="latex", digits=2) %>% 
+          kable_styling(latex_options = "hold_position")
+```
+
+Poniżej znajdują się również histogramy dla poszczególnych zmiennych.
+
+```{r histogram_tenure, echo=FALSE, fig.cap="\\label{fig:histogram_tenure}Histogram dla zmiennej tenure"}
+# Utworzenie histogramu dla zmiennej tenure
+hist(tenure, col="#B7ABCC", main="Histogram dla zmiennej tenure")
+
+```
+
+
+```{r histogram_MonthlyCharges, echo=FALSE, fig.cap="\\label{fig:histogram_MonthlyCharges}Histogram dla zmiennej MonthlyCharges"}
+# Utworzenie histogramu dla zmiennej MonthlyCharges
+hist(MonthlyCharges, col="#89AC6B", main="Histogram dla zmiennej MonthlyCharges")
+```
+
+
+```{r histogram_TotalCharges, echo=FALSE, fig.cap="\\label{fig:histogram_TotalCharges}Histogram dla zmiennej TotalCharges"}
+# Utworzenie histogramu dla zmiennej TotalCharges (omijamy przypadki niekompletne)
+hist(TotalChargesComplete, col="#9EBDC0", main="Histogram dla zmiennej TotalCharges", xlab="TotalCharges")
+```
+
+Na postawie wykresów oraz wskaźników można powiedzieć kilka rzeczy o tych zmiennych. W przypadku zmiennej tenure (wykres&nbsp;\ref{fig:histogram_tenure}) można łatwo zauważyć, że najwięcej klientów zostaje tylko przez kilka pierwszych miesięcy – aż 25% zostaje jedynie przez 9 miesięcy! Połowa klientów natomiast zostaje przez około 2,5 roku (dokładniej przez 29 miesięcy). To prowadzi do wniosku, że firma powinna skupić się na zachęcaniu przede wszystkim nowych klientów.
+
+Zmienna TotalCharges (wykres&nbsp;\ref{fig:histogram_TotalCharges}) ma wykres nieco podobny do wykresu tenure, charakteryzujący się podobnymi cechami – połowa klientów zapłaciła łącznie nie tak wiele w porównaniu do maksymalnej możliwej kwoty.
+
+Natomiast w przypadku zmiennej MonthlyCharges (wykres&nbsp;\ref{fig:histogram_MonthlyCharges}) można dostrzec, że jej rozkład jest wielomodalny – największą częstotliwość występowania wartości zauważam w przedziałach 20–30 oraz 70–90. Ponadto więcej wartości skupia się raczej wokół tej drugiej mody – potwierdza to miara skośności, która jest ujemna i wskazuje raczej na dłuższy lewy ogon.
+
+### Zależności pomiędzy zmiennymi liczbowymi
+```{r wykresy_rozrzutu, echo=FALSE, fig.cap="\\label{fig:wykresy_rozrzutu}Wykresy rozrzutu dla zmiennych liczbowych"}
+# Uworzenie wykresów rozrzutu
+pairs(cbind(MonthlyCharges, TotalCharges, tenure), na.action="na.omit")
+```
+Współczynniki korelacji pomiędzy poszczególnymi zmiennymi prezentują się następująco:
+
+* tenure i MonthlyCharges: `r cor(MonthlyCharges, tenure)`,
+* tenure i TotalCharges:`r cor(tenure, TotalCharges, use="pairwise.complete.obs")`,
+* MonthlyCharges i TotalCharges: `r cor(MonthlyCharges, TotalCharges, use="pairwise.complete.obs")`.
+
+Największa korelacja występuje pomiędzy zmiennymi tenure i TotalCharges – jak można się spodziewać, łączne opłaty będą powiązane z czasem korzystania z usług firmy. Słabsza korelacja występuje pomiędzy opłatami miesięcznymi i łącznymi, natomiast praktycznie nie ma związku pomiędzy czasem korzystania z firmy a miesięcznymi opłatami.
+
+## Zmienne jakościowe – analiza ogólna
+
+```{r podstawowe_informacje, echo=FALSE, fig.cap="\\label{fig:podstawowe_informacje}Wykresy słupkowe przedstawiające podstawowe informacje o klientach", out.width="90%", out.height="100%"}
+### Utworzenie wykresów z ogólnymi informacjami o klientach ###
+par(mfrow=c(2,2), mar=c(4,3,2,2)) # Ustawienie podziału rysunków i marginesów
+# Generacja wykresów dla odpowiednich zmiennych
+barplot(table(gender), col=rainbow(2), main="Gender", las=2)
+barplot(table(SeniorCitizen), col=rainbow(2), main="SeniorCitizen", las=2, ylim=c(0,6000))
+barplot(table(Partner), col=rainbow(2), main="Partner", las=2, ylim=c(0,4000))
+barplot(table(Dependents), col=rainbow(2), main="Dependents", las=2, ylim=c(0,5000))
+
+```
+Z podstawowych informacji o klientach (rysunek&nbsp;\ref{fig:podstawowe_informacje}) można dowiedzieć się, że są to głównie osoby niebędące seniorami i nie mające nikogo na swoim utrzymaniu. Odrobinę więcej osób nie ma partnera niż ma, jednak nie jest to ogromna różnica. Nie ma dominacji którejś z płci.
+
+
+```{r telefon, echo=FALSE, fig.cap="\\label{fig:telefon}Wykresy słupkowe przedstawiające informacje o usługach telefonicznych", out.height="100%"}
+### Uworzenie wykresów z informacjami o usługach telefonicznych ###
+par(mfrow=c(1,2), mar=c(3,3,2,2)) # Podział rysunków i marginesy
+# Odpowiednie wykresy
+barplot(table(PhoneService), col=rainbow(3), main="PhoneService", ylim=c(0,7000))
+barplot(table(MultipleLines, exclude="No phone service"), col=rainbow(3), main="MultipleLines", ylim=c(0,3500))
+```
+Rysunek&nbsp;\ref{fig:telefon} pokazuje, że zdecydowana większość klientów korzysta z usług telefonicznych, a wśród użytkowników tych usług większa część korzysta z jednej linii, lecz nie w przytłaczającej większości, ponieważ całkiem sporo osób korzysta z wielu linii.
+
+```{r internet_ogolny, echo=FALSE, fig.cap="\\label{fig:internet_ogolny}Wykres słupkowy przedstawiający informacje ogólne o usłudze internetowej", out.height="100%"}
+### Wykres informacji o tym, z jakiej usługi internetowej korzystają klienci
+barplot(table(InternetService), col=rainbow(3), main="InternetService", las=2, ylim=c(0,3500))
+```
+
+
+```{r internet, echo=FALSE, fig.cap="\\label{fig:internet}Wykresy słupkowe przedstawiające informacje o dodatkowych usługach internetowych", out.height="100%"}
+### Wykresy informacji o dodatkowych usługach internetowych
+par(mfrow=c(2,2), mar=c(4,3,2,2)) # ustawienia dla poniższych wykresów
+barplot(table(OnlineSecurity, exclude="No internet service"), col=rainbow(3), main="OnlineSecurity", ylim=c(0,3500))
+barplot(table(OnlineBackup, exclude="No internet service"), col=rainbow(3), main="OnlineBackup")
+barplot(table(DeviceProtection, exclude="No internet service"), col=rainbow(3), main="DeviceProtection", ylim=c(0,3500))
+barplot(table(TechSupport, exclude="No internet service"), col=rainbow(3), main="TechSupport", ylim=c(0,3500))
+```
+Jeśi chodzi o usługi internetowe, najwięcej klientów korzysta ze światłowodu (wykres&nbsp;\ref{fig:internet_ogolny}), natomiast w drugiej kolejności plasuje się skrętka miedziana. Mniejsza część klientów nie korzysta z usług internetowych, jednak liczba ta jest większa niż w przypadku osób nie korzystających z usług telefonicznych.
+
+Na rysunku&nbsp;\ref{fig:internet} da się łatwo dotrzec, że osoby korzystające z usług internetowych w większości nie korzystają z dodatkowych związanych usług, w szczególności najmniejszym zainteresowaniem cieszy się usługa bezpieczeństwa online.
+
+```{r streaming, echo=FALSE, fig.cap="\\label{fig:streaming}Wykresy słupkowe przedstawiające informacje o usługach streamingowych"}
+### Utworzenie wykresów z informacjami o usługach streamingowych ###
+par(mfrow=c(1,2), mar=c(3,3,2,2)) # Podział rysunków i marginesy
+# Odpowiednie wykresy
+barplot(table(StreamingTV, exclude="No internet service"), col=rainbow(3), main="StreamingTV", ylim=c(0,3000))
+barplot(table(StreamingMovies, exclude="No internet service"), col=rainbow(3), main="StreamingMovies", ylim=c(0,3000))
+```
+Jeśli chodzi o usługi streamingowe, wyniki wśród osób z aktywną usługą internetową są raczej wyrównane (rysunek&nbsp;\ref{fig:streaming}).
+
+```{r payment, echo=FALSE, fig.cap="\\label{fig:payment}Wykresy słupkowe przedstawiające informacje o płatnościach"}
+### Utworzenie wykresów z informacjami o płatnościach
+par(mfrow=c(1,3), mar=c(12,3,2,2)) # Ustawienia podziału i marginesów
+# Odpowiednie wykresy
+barplot(table(Contract), col=rainbow(3), main="Contract", las=2, ylim=c(0,4000))
+barplot(table(PaperlessBilling), col=rainbow(2), main="PaperlessBilling", las=2)
+barplot(table(PaymentMethod), col=rainbow(4), main="PaymentMethod", las=2, ylim=c(0,2500))
+```
+Z rysunku&nbsp;\ref{fig:payment} można odczytać, że zdecydowana większość klientów podpisała miesięczne umowy, natomiast wśród pozostałych nieznacznie większym zainteresowaniem cieszą się dwuletnie umowy względem rocznych. Większość klientów korzysta także z elektronicznych rachunków. Jeśli chodzi o metody płatności, największą popularnością cieszy się elektroniczny czek, natomiast wśród pozostałych metod płatności żadna się szczególnie nie wyróżnia.
+
+```{r churn, echo=FALSE, fig.cap="\\label{fig:churn}Wykres słupkowy przedstawiający informację o odejściach"}
+# Wykres z informacjami o odejściach
+barplot(table(Churn), col=c("green", "red"), main="Churn")
+```
+Większość klientów, jak się okazuje, pozostaje lojalna wobec firmy (wykres&nbsp;\ref{fig:churn}).
+
+## Zmienne liczbowe – analiza z podziałem
+Analizy dokonuję w taki sam sposób jak wcześniej, tyle że z podziałem na podzbiory.
+
+Najpierw wyznaczę wskaźniki sumaryczne.
+
+```{r wskazniki_sumaryczne_churn, echo=FALSE}
+# Tabela z podsumowaniami dla zmiennych liczbowych z podziałem względem zmiennej churn
+nazwy.wskaznikow <- names(podsumowanie(tenure))
+nazwy.zmiennych  <- c("tenure.no", "tenure.yes", "MonthlyC.no", "MonthlyC.yes", "TotalC.no", "TotalC.yes")
+tenure.no.podsumowanie <- as.vector(podsumowanie(churn.no$tenure))
+tenure.yes.podsumowanie <- as.vector(podsumowanie(churn.no$tenure))
+MonthlyCharges.no.podsumowanie <- as.vector(podsumowanie(churn.no$MonthlyCharges))
+MonthlyCharges.yes.podsumowanie <- as.vector(podsumowanie(churn.yes$MonthlyCharges))
+TotalChargesComplete.no <- na.omit(churn.no$TotalCharges) #utworzenie podzbioru TotalCharges omijającego wyniki NA
+TotalChargesComplete.yes <- na.omit(churn.yes$TotalCharges) #utworzenie podzbioru TotalCharges omijającego wyniki NA
+TotalCharges.no.podsumowanie <- as.vector(podsumowanie(TotalChargesComplete.no))
+TotalCharges.yes.podsumowanie <- as.vector(podsumowanie(TotalChargesComplete.yes))
+podsumowanie.matrix <- cbind(tenure.no.podsumowanie, tenure.yes.podsumowanie, MonthlyCharges.no.podsumowanie, MonthlyCharges.yes.podsumowanie, TotalCharges.no.podsumowanie, TotalCharges.yes.podsumowanie)
+colnames(podsumowanie.matrix) <- nazwy.zmiennych
+row.names(podsumowanie.matrix)  <- nazwy.wskaznikow
+
+podsumowanie.matrix %>% 
+  kbl(caption="Podstawowe wskaźniki sumaryczne dla zmiennnych tenure, MonthlyCharges (w tabeli MonthlyC) oraz TotalCharges (w tabeli TotalC) z podziałem względem parametru Churn", format="latex", digits=2) %>% 
+          kable_styling(latex_options = "hold_position")
+```
+
+
+W następnej kolejności przeanalizuję wykresy.
+
+```{r tenure_churn, echo=FALSE, fig.cap="\\label{fig:tenure_churn}Histogram tenure z podziałem na klientów, którzy zostali i którzy odeszli"}
+# Ustawienia kolorów dla churn=no i churn=yes dla histogramów
+col.no <- rgb(0,1,0,0.5)
+col.yes  <- rgb(1,0,0,0.5)
+# Histogramy dla tenure z podziałem względem zmiennej churn (przeskalowane względem częstości, by odczytanie wyników dało bardziej wiarygodne wnioski)
+hist(churn.no$tenure, xlim=range(tenure), ylim=c(0,0.08), prob=T,col=col.no, main="Histogram tenure względem churn", xlab="tenure")
+hist(churn.yes$tenure, prob=T, col=col.yes, add=T)
+legend("top", fill=c(col.no, col.yes), legend=c("Churn=no", "Churn=yes")) # Legenda
+
+```
+Z wykresu&nbsp;\ref{fig:tenure_churn} można dowiedzieć się, że osoby, które odchodzą, najczęściej zostają krócej – odchodzą w pierwszych miesiącach.
+
+```{r MonthlyCharges_churn, echo=FALSE, fig.cap="\\label{fig:MonthlyCharges_churn}Histogram MonthlyCharges z podziałem na klientów, którzy zostali i którzy odeszli"}
+# Histogramy dla Monthlycharges z podziałem względem zmiennej churn
+hist(churn.no$MonthlyCharges, xlim=range(MonthlyCharges), ylim=c(0,0.03), prob=T,col=col.no, main="Histogram MonthlyCharges względem churn", xlab="MonthlyCharges")
+hist(churn.yes$MonthlyCharges, prob=T, col=col.yes, add=T)
+legend("topright", fill=c(col.no, col.yes), legend=c("Churn=no", "Churn=yes")) # Legenda
+
+```
+Wykres&nbsp;\ref{fig:MonthlyCharges_churn} pokazuje, że na ogół klienci, którzy odeszli, mieli wyższe opłaty od tych, którzy zostali, choć, co ciekawe, wśród osób, które mają najwyższe ze wszystkich opłat, więcej osób nadal jest lojalnych wobec firmy.
+
+```{r TotalCharges_churn, echo=FALSE, fig.cap="\\label{fig:TotalCharges_churn}Histogram TotalCharges z podziałem na klientów, którzy zostali i którzy odeszli"}
+# Histogramy TotalCharges z podziałem względem zmiennej churn (pomijam obserwacje niekompletne)
+options(scipen=999)
+hist(na.omit(churn.no$TotalCharges), 20, xlim=range(na.omit(TotalCharges)), ylim=c(0,0.001), col=col.no, main="Histogram TotalCharges względem churn", xlab="TotalCharges", prob=T)
+hist(na.omit(churn.yes$TotalCharges), 20, col=col.yes, add=T, prob=T)
+legend("topright", fill=c(col.no, col.yes), legend=c("Churn=no", "Churn=yes")) # Legenda
+
+```
+W przypadku łącznych opłat osoby, które odeszły, częściej wpadały w zakres najniższych opłat, natomiast dla wyższych opłat wyniki dla klientów lojalnych i nielojalnych prezentują się podobnie (wykres&nbsp;\ref{fig:TotalCharges_churn}).
+
+Teraz sprawdzę leszcze wykresy rozrzutu i zależności dla zmiennych liczbowych z podziałem na klientów, którzy odeszli i którzy pozostali.
+
+```{r rozrzut_churn, echo=FALSE, fig.cap="\\label{fig:rozrzut_churn}Wykresy rozrzutu dla zmiennych liczbowych z podziałem na klientów, którzy zostali i którzy odeszli"}
+# Wykresy rozrzutu z podziałem względem zmiennej churn
+pairs(cbind(MonthlyCharges, TotalCharges, tenure), na.action="na.omit", col=
+        Churn, pch=16, cex=0.5, oma=c(3,3,3,15))
+par(xpd = TRUE)
+legend("bottomright", fill=unique(Churn), legend=c("Churn=no", "Churn=yes")) # Legenda
+```
+
+
+```{r korelacje_churn, echo=FALSE}
+# Tabela współczynników korelacji zmiennych liczbowych z podziałem względem zmiennej churn
+kolumny <- c("tenure i MonthlyCharges", "tenure i TotalCharges", "MonthlyCharges i TotalCharges")
+wiersze <- c("Churn=no", "Churn=yes")
+churn.no.korelacje <- c(cor(churn.no$MonthlyCharges, churn.no$tenure), cor(churn.no$tenure, churn.no$TotalCharges, use="pairwise.complete.obs"), cor(churn.no$MonthlyCharges, churn.no$TotalCharges, use="pairwise.complete.obs"))
+churn.yes.korelacje <- c(cor(churn.yes$MonthlyCharges, churn.yes$tenure), cor(churn.yes$tenure, churn.yes$TotalCharges, use="pairwise.complete.obs"), cor(churn.yes$MonthlyCharges, churn.yes$TotalCharges, use="pairwise.complete.obs"))
+
+korelacje.matrix <- cbind(churn.no.korelacje, churn.yes.korelacje)
+colnames(korelacje.matrix) <- wiersze
+row.names(korelacje.matrix) <- kolumny
+
+korelacje.matrix %>% 
+  kbl(caption="\\label{fig:korelacje_churn}Współczynniki korelacji dla zmiennych liczbowych z uwzględnieniem parametru churn", format="latex", digits=2) %>% 
+          kable_styling(latex_options = "hold_position")
+
+```
+
+Największe powiązanie można zauważyć dla zmiennych tenure i TotalCharges w przypadku klientów, którzy odeszli (rysunek&nbsp;\ref{fig:rozrzut_churn}, tabela&nbsp;\ref{fig:korelacje_churn}).
+
+## Zmienne jakościowe – analiza z podziałem
+```{r podstawowe_informacje_churn, echo=FALSE, fig.cap="\\label{fig:podstawowe_informacje_churn}Wykresy mozaikowe przedstawiające podstawowe informacje o klientach z podziałem na tych, którzy zostali i którzy odeszli", out.width="90%", out.height="100%"}
+### Wykresy dla informacji ogólnych z podziałem względem zmiennej churn ###
+par(mfrow=c(2,2), mar=c(3,5,2,2)) # Ustawienia podziału i marginesów
+# Wykresy
+plot(Churn~gender, main="Gender", col=c("red", "green"))
+plot(Churn~SeniorCitizen, main="Senior Citizen", col=c("red", "green"))
+plot(Churn~Partner, main="Partner", col=c("red", "green"))
+plot(Churn~Dependents, main="Dependents", col=c("red", "green"))
+
+```
+Na podstawie wykresów dotyczących ogólnych danych o klientach z rysunku&nbsp;\ref{fig:podstawowe_informacje_churn} nie ma związku pomiędzy płcią a decyzją o korzystaniu z usług. Można natomiast zauważyć, że nieco częściej odchodzą seniorzy, osoby samotne oraz takie, które nie mają utrzymanków.
+
+```{r telefon_churn, echo=FALSE, fig.cap="\\label{fig:telefon_churn}Wykresy mozaikowe przedstawiające informacje o usługach telefonicznych z podziałem na tych, którzy zostali i którzy odeszli", out.height="100%"}
+
+### Wykresy informacji o usługach telefonicznych z podziałem względem zmiennej churn
+par(mfrow=c(1,2), mar=c(3,3,2,2)) # Podział i marginesy
+mosaicplot(xtabs(~PhoneService + Churn, data=churn), main="PhoneService", col=c("green", "red"))
+mosaicplot(xtabs(~MultipleLines + Churn, data=churn, exclude="No phone service"), main="MultipleLines", col=c("green", "red"))
+```
+Rysunek&nbsp;\ref{fig:telefon_churn} pokazuje, że usługi telefoniczne nie mają istotnego wpływu na to, czy klienci odchodzą, czy nie.
+
+```{r internet_churn, echo=FALSE, fig.cap="\\label{fig:internet_churn}Wykres mozaikowy przedstawiający informacje o usługach internetowych z podziałem na tych, którzy zostali i którzy odeszli", out.height="100%"}
+
+### Wykresy informacji o usługach internetowych z podziałem względem zmiennej churn ###
+mosaicplot(xtabs(~InternetService + Churn, data=churn), main="InternetService", col=c("green", "red"))
+
+```
+
+
+```{r internet_dodatkowy_churn, echo=FALSE, fig.cap="\\label{fig:internet_dodatkowy_churn}Wykresy mozaikowe przedstawiające informacje o dodatkowych usługach internetowych z podziałem na tych, którzy zostali i którzy odeszli", out.height="100%"}
+
+### Wykresy informacji o dodatkowych usługach internetowych z podziałem względem zmiennej churn ###
+par(mfrow=c(2,2), mar=c(3,3,2,2))
+mosaicplot(xtabs(~OnlineSecurity + Churn, data=churn, exclude="No internet service"), main="OnlineSecurity", col=c("green", "red"))
+mosaicplot(xtabs(~OnlineBackup + Churn, data=churn, exclude="No internet service"), main="OnlineBackup", col=c("green", "red"))
+mosaicplot(xtabs(~DeviceProtection + Churn, data=churn, exclude="No internet service"), main="DeviceProtection", col=c("green", "red"))
+mosaicplot(xtabs(~TechSupport + Churn, data=churn, exclude="No internet service"), main="TechSupport", col=c("green", "red"))
+
+```
+Użytkownicy korzystający z Internetu odchodzą częściej niż ci, którzy w ogóle nie korzystają z tej usługi. Najczęściej rezygnują użytkownicy światłowodu (wykres&nbsp;\ref{fig:internet_churn}). Z rysunku&nbsp;\ref{fig:internet_dodatkowy_churn} można wywnioskować natomiast, że korzystanie z dodatkowych usług związanych z Internetem jednak nieco zmniejsza prawdopodobieństwo odejścia – najbardziej skuteczne w tej kwestii są usługi bezpieczeństwa online i wsparcia technicznego, mniejsze znaczenie mają backup i ochrona urządzenia.
+
+```{r streaming_churn, echo=FALSE, fig.cap="\\label{fig:streaming_churn}Wykresy mozaikowe przedstawiające informacje o usługach streamingowych z podziałem na tych, którzy zostali i którzy odeszli"}
+### Wykresy informacji o usługach streamingowych z podziałem względem zmiennej churn ###
+par(mfrow=c(1,2), mar=c(3,3,2,2))
+mosaicplot(xtabs(~StreamingTV + Churn, data=churn, exclude="No internet service"), main="StreamingTV", col=c("green", "red"))
+mosaicplot(xtabs(~StreamingMovies + Churn, data=churn, exclude="No internet service"), main="StreamingMovies", col=c("green", "red"))
+```
+
+Wśród osób korzystających z Internetu usługi streamingowe nie zdają się zbytnio zmieniać sytuacji – odrobinę zmniejszają szansę odejścia, jednak różnica pomiędzy odejściami osób mających te usługi a nie mających jest niewielka (rysunek&nbsp;\ref{fig:streaming_churn}).
+
+```{r umowa_churn, echo=FALSE, fig.cap="\\label{fig:umowa_churn}Wykres mozaikowy przedstawiający informacje o typie umowy z podziałem na tych, którzy zostali i którzy odeszli"}
+
+### Informacje o umowie z podziałem względem zmiennej churn
+mosaicplot(xtabs(~Contract + Churn, data=churn), main="Contract", col=c("green", "red"))
+```
+
+
+```{r rachunki_churn, echo=FALSE, fig.cap="\\label{fig:rachunki_churn}Wykres mozaikowy przedstawiający informacje o rachunkach z podziałem na tych, którzy zostali i którzy odeszli"}
+
+### Informacje o rachunkach z podziałem względem zmiennej churn
+mosaicplot(xtabs(~PaperlessBilling + Churn, data=churn), main="PaperlessBilling", col=c("green", "red"))
+```
+
+
+```{r platnosci_churn, echo=FALSE, fig.cap="\\label{fig:platnosci_churn}Wykres mozaikowy przedstawiający informacje o metodzie płatności z podziałem na tych, którzy zostali i którzy odeszli"}
+
+### Informacje o metodzie płatności z podziałem względem zmiennej churn
+mosaicplot(xtabs(~PaymentMethod + Churn, data=churn), main="PaymentMethod", col=c("green", "red"))
+```
+
+Wykresy &nbsp;\ref{fig:umowa_churn}, \ref{fig:rachunki_churn} oraz \ref{fig:platnosci_churn} pokazują, że detale umowy i płatności mają spore znaczenie. Najczęściej odchodzą osoby o umowach miesięcznych – dłuższe umowy zmniejszają ryzyko odejścia. Jesli chodzi o rozliczanie płatności, można zauważyć, że częściej odchodzą osoby, które rozliczają się elektronicznie, a także te, które płacą przy pomocy elektronicznego czeku. Inne metody płatności nie różnią się szczególnie pomiędzy sobą.
+
+## Podsumowanie
+Dzięki powyższej analizie można zauważyć kilka rzeczy.
+
+1. Najwięcej klientów odchodzi w pierwszych miesiącach od rozpoczęcia korzystania z usług firmy.
+2. Częściej odchodzą osoby mające wyższe miesięczne opłaty.
+3. Nieco częściej odchodzą seniorzy, osoby samotne i nie posiadające utrzymanków.
+4. Częściej odchodzą użytkownicy usług internetowych, zwłaszcza klienci korzystający ze światłowodu (a warto zauważyć, że najwięcej klientów w ogóle korzysta ze światłowodu).
+5. Dodatkowe usługi związane z Internetem nieco zmniejszają prawdopodobieństwo odejścia.
+6. Najczęściej odchodzą osoby mające miesięczne umowy, odchodzi znacznie mniej osób z rocznymi umowami, a najmniej odchodzi tych, którzy mają umowy dwuletnie. Warto zauważyć, że najwięcej osób decyduje się na miesięczne umowy!
+7. Częściej odchodzą osoby bez papierowych rachunków. Jednocześnie większość klientów woli rozliczać się bez papieru.
+8. Najczęściej odchodzą osoby korzystające z e-mailowego czeku – czyli metody używanej przez największą liczbę klientów.
+
+Aby zapobiec odchodzeniu klientów, moim zdaniem firma może podjąć następujące działania:
+
+* bardziej dbać o nowych klientów, a także proponować im dłuższe umowy,
+* jeśli to możliwe, zmniejszyć nieco miesięczne opłaty,
+* poprawić jakość internetowych usług, zwłaszcza światłowodu, gdyż mimo jego popularności jego użytkownicy dość często odchodzą,
+* przy zawieraniu umów włączających usługę internetową proponować dodatkowe powiązane usługi,
+* przyjrzeć się elektronicznemu rozliczaniu umów, a także e-mailowym czekom.

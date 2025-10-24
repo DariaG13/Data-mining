@@ -1,0 +1,1166 @@
+---
+title: "Sprawozdanie z listy 3"
+subtitle: "Eksploracja danych"
+author: "Daria Grzelak, 277533"
+date: "`r Sys.Date()`"
+header-includes:
+   - \usepackage[OT4]{polski}
+   - \usepackage[utf8]{inputenc}
+   - \usepackage{graphicx}
+   - \usepackage{float}
+output: 
+  pdf_document:
+    toc: true
+    fig_caption: yes
+    fig_width: 5 
+    fig_height: 4 
+    number_sections: true
+    extra_dependencies: "subfig"
+fontsize: 12pt 
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(warning = FALSE, message = FALSE, cache=TRUE) 
+knitr::opts_chunk$set(fig.pos = "H", out.extra = "", fig.align = "center")
+```
+
+# Krótki opis zagadnienia
+Głównym tematem niniejszego raportu są rozmaite metody klasyfikacji. W pierwszej części przedstawiona zostanie klasyfikacja na bazie modelu regresji liniowej, natomiast w drugiej zostaną porównane trzy metody klasyfikacji: metoda k-najbliższych sąsiadów, drzewa klasyfikacyjne oraz naiwny klasyfikator Bayesowski.
+
+Zanim przejdę do szerszego omówienia zagadnień, załaduję potrzebne pakiety.
+
+```{r pakiety}
+# Załadowanie potrzebnych pakietów
+library(mlbench) # dane Glass
+library(ipred) # k-nn, predykcje
+library(rpart) # drzewa klasyfikacyjne
+library(rpart.plot) # wykresy dla drzew klasyfikacyjnych
+library(e1071) # naive Bayes
+library(klaR) # Naive Bayes (z jądrową estymacją gęstości)
+```
+
+# Klasyfikacja na bazie modelu regresji liniowej
+W pierwszej części niniejszego raportu skupię się na jednej z metod klasyfikacji – na bazie modelu regresji liniowej.
+
+## Wykorzystane metody
+Do wykonania klasyfikacji wykorzystam następujące metody i narzędzia:
+
+* podział danych w sposób losowy,
+* utworzenie modeli regresji liniowej dla każdej klasy osobno,
+* prognozowanie etykietek na bazie utworzonych modeli,
+* ocena jakości modelu poprzez macierz pomyłek,
+* utworzenie modelu na podstawie rozszerzonej przestrzeni cech.
+
+## Opis danych
+Dane, które będę analizować, to ``iris`` z R-pakietu datasets, zawierający obserwacje na temat trzech gatunków irysów.
+
+```{r dane_iris}
+# Wczytanie danych
+data(iris)
+```
+
+Dane te zawierają `r dim(iris)[1]` obserwacji i `r dim(iris)[2]` zmiennych.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Nazwa}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+Sepal.Length & Liczbowa & Długość działki kielicha \\
+\hline
+Sepal.Width & Liczbowa & Szerokość działki kielicha \\
+\hline
+Petal.Length & Liczbowa & Długość płatka \\
+\hline
+Petal.Width & Liczbowa & Szerokość płatka \\
+\hline
+Species & Jakościowa & Gatunek \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych iris}
+\label{opis_cech_1}
+\end{table}
+
+W tabeli&nbsp;\ref{opis_cech_1} umieszczam opis cech zawartych w tych danych.
+
+## Podział danych na zbiory uczący i testowy
+Aby utworzyć model regresji liniowej i na jego podstawie dopasowywać etykietki klas do danych, podzielę je na dwa podzbiory: uczący (2/3 obserwacji) i testowy (lub treningowy; 1/3 obserwacji). Przed losowaniem natomiast ustawię ziarno generatora, aby otrzymać powtarzalność wyników.
+
+```{r iris_division}
+## Ziarno generatora
+set.seed(123)
+
+## Podział na podzbiory uczący i testowy
+# Wylosowanie 100 numerów
+x <- sample(1:150, 100)
+# Posortowanie wylosowanych numerów
+x <- sort(x)
+
+# Podział na podzbiory według numerów
+iris.learn <- iris[x,]
+iris.train <- iris[-x,]
+```
+
+Następnie, aby utworzyć modele regresji liniowej dla poszczególnych klas, należy utworzyć dodatkowe zmienne wskazujące, czy dana obserwacja należy do konkretnego gatunku (1), czy nie (0). Potrzebne są trzy zmienne dla każdego gatunku.
+
+```{r iris_dodanie_zmiennej}
+## Odpowiednie zmienne wskaźnikowe dla klas ze zbioru uczącego
+# Liczby wystąpień poszczególnych klas
+numbers <- tabulate(as.numeric(iris.learn$Species))
+
+# Wskaźniki
+Y1 <- c(rep(1,numbers[1]),rep(0,100-numbers[1]))
+Y2 <- c(rep(0,numbers[1]),rep(1,numbers[2]),rep(0,numbers[3]))
+Y3 <- c(rep(0,100-numbers[3]),rep(1,numbers[3]))
+
+# Zastąpienie nazw klas etykietkami (należy do klasy/nie należy do klasy)
+iris1 <- cbind(iris.learn[,1:4],Y1) # setosa
+iris2 <- cbind(iris.learn[,1:4],Y2) # versicolor
+iris3 <- cbind(iris.learn[,1:4],Y3) # virginica
+```
+
+W wyniku takiego podziału utworzone zostały trzy zbiory stanowiące modyfikacje zbioru ``iris.learn`` – zamiast etykietek klas (gatunków) dodane zostały zmienne określające przynależność do wybranego gatunku.
+
+## Konstrukcja klasyfikatora i wyznaczenie prognoz
+W następnym kroku przechodzę do konstrukcji klasyfikatora. Posłużę się trzema niezależnymi klasyfikatorami, z czego każdy z nich określa prawdopodobieństwo tego, że dana obserwacja należy do wybranego gatunku.
+
+```{r iris_modele}
+# Dopasowanie 3 niezależnych modeli regresji liniowej
+iris1.lm <- lm(Y1~., data=iris1)
+iris2.lm <- lm(Y2~., data=iris2)
+iris3.lm <- lm(Y3~., data=iris3)
+```
+
+Po utworzeniu tych trzech modeli dokonam prognozy na jego podstawie dla zbiorów uczącego i treningowego. Przewidywania wyznaczają prawdopodobieństwo tego, że dana obserwacja należy do wybranej klasy. Następnie porównuję prawdopodobieństwa i dla każdej obserwacji przypisuję tę etykietkę klasy, dla której prawdopodobieństwo jest największe. Taką klasyfikację powtarzam dla zbioru uczącego i treningowego.
+
+```{r iris_klasyfikacja}
+## Prognozowanie dla zbioru uczącego
+# prognozowanie zmiennej zależnej (prognozowane p-stwo a posteriori)
+pred1.lm <- predict(iris1.lm, iris1)
+pred2.lm <- predict(iris2.lm, iris2)
+pred3.lm <- predict(iris3.lm, iris3)
+
+# zamiana p-stw a posteriori na etykietki klas
+# (kodowanie klas: 1-setosa, 2-versicolor, 3-virginica)
+pred.lm <- rep(1, length(pred1.lm))
+pred.lm[pred2.lm > pmax(pred1.lm,pred3.lm)] = 2
+pred.lm[pred3.lm > pmax(pred1.lm,pred2.lm)] = 3
+
+# Prognozowanie dla zbioru treningowego
+# prognoza
+pred.train1.lm <- predict(iris1.lm, iris.train)
+pred.train2.lm <- predict(iris2.lm, iris.train)
+pred.train3.lm <- predict(iris3.lm, iris.train)
+
+# zamiana prawdopodobieństw na etykietki klas
+pred.train.lm <- rep(1, length(pred.train1.lm))
+pred.train.lm[pred.train2.lm > pmax(pred.train1.lm,pred.train3.lm)] = 2
+pred.train.lm[pred.train3.lm > pmax(pred.train1.lm,pred.train2.lm)] = 3
+```
+
+## Ocena jakości modelu
+Aby ocenić jakość modelu, wykorzystam macierz pomyłek oraz błąd klasyfikacji dla zbiorów uczącego oraz testowego.
+
+```{r iris_ocena}
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.iris.learn <- table(pred.lm, iris.learn$Species)
+# Dokładność
+accuracy.iris.learn <- 
+  sum(diag(conf.matrix.iris.learn))/sum(conf.matrix.iris.learn)
+# Błąd klasyfikacji
+error.iris.learn <- 1 - accuracy.iris.learn
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.iris.train <- table(pred.train.lm, iris.train$Species)
+# Dokładność
+accuracy.iris.train <-
+  sum(diag(conf.matrix.iris.train))/sum(conf.matrix.iris.train)
+# Błąd klasyfikacji
+error.iris.train <- 1 - accuracy.iris.train
+```
+
+Macierz pomyłek dla zbioru uczącego prezentuje się następująco:
+
+```{r iris_learn_macierz, echo=FALSE}
+conf.matrix.iris.learn
+```
+Z wyliczeń wynika natomiast, że dokładność modelu dla zbioru uczącego wynosi `r accuracy.iris.learn`, zatem błąd klasyfikacji wynosi `r error.iris.learn`.
+
+Analogicznie, macierz pomyłek dla zbioru testowego prezentuje się następująco:
+
+```{r iris_train_macierz, echo=FALSE}
+conf.matrix.iris.train
+```
+Z wyliczeń wynika, że dokładność modelu dla zbioru testowego wynosi `r accuracy.iris.train`, zatem błąd klasyfikacji wynosi `r error.iris.train`.
+
+## Model liniowy dla rozszerzonej przestrzeni cech
+W następnej kolejności zbadam, jak rozszerzenie przestrzeni cech o iloczyny poszczególnych zmiennych objaśniających wpłynie na jakość modelu.
+
+```{r iris_extended}
+## Utworzenie rozszerzonego zbioru uczącego
+# Kopia obecnego zbioru
+iris.learn.new <- iris.learn
+# Skrócenie nazw
+names(iris.learn.new) <- c("SL","SW","PL","PW","Spec")
+# Dodanie wielomianów
+iris.learn.new <- transform(iris.learn.new, SL.SW=SL*SW,  PL.PW=PL*PW, 
+                            PL.SL=PL*SL, PL.SW=PL*SW, PW.SW=PW*SW,
+                            PW.SL=PW*SL, PL2=PL*PL, PW2=PW*PW, SL2=SL*SL,
+                            SW2=SW*SW)
+
+# Zastąpienie nazw klas etykietkami (należy do klasy/nie należy do klasy)
+iris1.new <- cbind(iris.learn.new[,-5],Y1)
+iris2.new <- cbind(iris.learn.new[,-5],Y2)
+iris3.new <- cbind(iris.learn.new[,-5],Y3)
+
+## Utworzenie rozszerzonego zbioru treningowego
+# Kopia obecnego zbioru
+iris.train.new <- iris.train
+# Skrócenie nazw
+names(iris.train.new) <- c("SL","SW","PL","PW","Spec")
+# Dodanie wielomianów
+iris.train.new <- transform(iris.train.new, SL.SW=SL*SW,  PL.PW=PL*PW,
+                            PL.SL=PL*SL, PL.SW=PL*SW, PW.SW=PW*SW,
+                            PW.SL=PW*SL, PL2=PL*PL, PW2=PW*PW, SL2=SL*SL,
+                            SW2=SW*SW)
+```
+
+Następnie dopasuję modele regresji liniowej i na ich podstawie będę prognozować etykietki klas, dokładnie tak samo jak wcześniej.
+
+```{r iris_extended_model}
+## Dopasowanie K=3 niezależnych modeli regresji liniowej
+iris1.lm.new <- lm(Y1~., data=iris1.new)
+iris2.lm.new <- lm(Y2~., data=iris2.new)
+iris3.lm.new <- lm(Y3~., data=iris3.new)
+
+## Prognozowanie dla zbioru uczącego
+# prognozowanie zmiennej zależnej (prognozowane p-stwo a posteriori)
+pred1.lm.new  <- predict(iris1.lm.new, iris1.new)
+pred2.lm.new  <- predict(iris2.lm.new, iris2.new)
+pred3.lm.new  <- predict(iris3.lm.new, iris3.new)
+
+# zamieniamy p-stwa a posteriori na etykietki klas
+# (kodowanie klas: 1-setosa, 2-versicolor, 3-virginica) 
+pred.learn.new <- rep(1, length(pred1.lm.new) )
+pred.learn.new[pred2.lm.new > pmax(pred1.lm.new,pred3.lm.new)] = 2
+pred.learn.new[pred3.lm.new > pmax(pred1.lm.new,pred2.lm.new)] = 3
+
+# macierz pomyłek
+conf.matrix.iris.learn.new <- table(pred.learn.new, iris.learn.new$Spec)
+accuracy.iris.learn.new <-
+  sum(diag(conf.matrix.iris.learn.new))/sum(conf.matrix.iris.learn.new)
+error.iris.learn.new <- 1 - accuracy.iris.learn.new
+
+## Prognoza dla zbioru treningowego
+# Prognozowanie dla zbioru treningowego
+pred.train1.lm.new <- predict(iris1.lm.new, iris.train.new)
+pred.train2.lm.new <- predict(iris2.lm.new, iris.train.new)
+pred.train3.lm.new <- predict(iris3.lm.new, iris.train.new)
+
+# zamieniamy p-stwa a posteriori na etykietki klas
+# (kodowanie klas: 1-setosa, 2-versicolor, 3-virginica) 
+pred.train.new <- rep(1, length(pred.train1.lm.new) )
+pred.train.new[pred.train2.lm.new >
+                 pmax(pred.train1.lm.new,pred.train3.lm.new)] = 2
+pred.train.new[pred.train3.lm.new >
+                 pmax(pred.train1.lm.new,pred.train2.lm.new)] = 3
+
+# macierz pomyłek
+conf.matrix.iris.train.new <- table(pred.train.new, iris.train.new$Spec)
+accuracy.iris.train.new <-
+  sum(diag(conf.matrix.iris.train.new))/sum(conf.matrix.iris.train.new)
+error.iris.train.new <- 1 - accuracy.iris.train.new
+```
+
+Tak jak wcześniej, przyjrzę się macierzom pomyłek oraz błędom klasyfikacji dla zbiorów uczącego i testowego.
+
+Macierz pomyłek dla zbioru uczącego prezentuje się następująco:
+
+```{r iris_learn_new_macierz, echo=FALSE}
+conf.matrix.iris.learn.new
+```
+Z wyliczeń wynika natomiast, że dokładność modelu dla zbioru uczącego wynosi `r accuracy.iris.learn.new`, zatem błąd klasyfikacji wynosi `r error.iris.learn.new`.
+
+Analogicznie, macierz pomyłek dla zbioru testowego prezentuje się następująco:
+
+```{r iris_train_new_macierz, echo=FALSE}
+conf.matrix.iris.train.new
+```
+Z wyliczeń wynika, że dokładność modelu dla zbioru testowego wynosi `r accuracy.iris.train.new`, zatem błąd klasyfikacji wynosi `r error.iris.train.new`.
+
+## Wnioski
+W obu modelach dokładność jest dość wysoka i występują niewielkie różnice pomiędzy zbiorem uczącym a testowym (do 0,1), na korzyść tego drugiego. Jednak model rozszerzony daje dużo wyższą dokładność – dla zbioru testowego źle przypisana została jedynie jedna obserwacja – co znaczy, że jest dużo skuteczniejszy od modelu zwykłego.
+
+W zwykłym modelu natomiast częściowo zdaje się zachodzić zjawisko maskowania klas – dla zbioru uczącego około połowa obserwacji z klasy środkowej zostaje błędnie przypisana do klasy trzeciej, a dla zbioru testowego – około 1/3.
+
+Co ciekawe, dla obu modeli wszystkie obserwacje z gatunku setosa zostają poprawnie do niego przypisanego. Natomiast w modelu rozszerzonym wszystkie błędne klasyfikacje to obserwacje z gatunku virginica, które model przypisuje niepoprawnie do klasy versicolor. Oznacza to najprawdopobniej, że gatunek setosa ogólnie łatwiej odróżnić od pozostałych dwóch gatunków.
+
+# Porównanie metod klasyfikacji
+W drugiej części niniejszego sprawozdania porównam ze sobą trzy inne metody klasyfikacji. Będą to metoda k-najbliższych sąsiadów, drzewa klasyfikacyjne oraz naiwny klasyfikator Bayesowski.
+
+## Wykorzystane metody
+W tej części sprawozdania wykorzystam następujące metody:
+
+* metody analizy opisowej do wstępnego zbadania danych,
+* metody klasyfikacyjne (k-najbliższych sąsiadów, drzewa klasyfikacyjne, naiwny klasyfikator Bayesowski),
+* metody graficzne do prezentacji wyników (wykresy),
+* macierze pomyłek i błędy klasyfikacji,
+* metody oceny dokładności klasyfikacji (cross-validation, bootstrap, 632plus).
+
+## Opis danych
+Analizowanymi danymi będą dane ``Glass`` z pakietu ``mlbench``.
+
+```{r glass}
+# Wczytanie danych
+data(Glass)
+```
+
+Analizowane dane mają `r dim(Glass)[1]` obserwacji oraz `r dim(Glass)[2]` zmiennych.
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|}
+\hline
+\textbf{Nazwa}& \textbf{Typ} & \textbf{Opis}\\
+\hline
+RI & Liczbowa & Współczynnik załamania \\
+\hline
+Na & Liczbowa & Zawartość procentowa sodu \\
+\hline
+Mg & Liczbowa & Zawartość procentowa magnezu \\
+\hline
+Al & Liczbowa & Zawartość procentowa glinu \\
+\hline
+Si & Liczbowa & Zawartość procentowa krzemu \\
+\hline
+K & Liczbowa & Zawartość procentowa potasu \\
+\hline
+Ca & Liczbowa & Zawartość procentowa wapnia \\
+\hline
+Ba & Liczbowa & Zawartość procentowa baru \\
+\hline
+Fe & Liczbowa &  Zawartość procentowa żelaza \\
+\hline
+Type & Jakościowa & Typ szkła \\
+\hline
+\end{tabular}
+\caption{Opis cech zawartych w danych Glass}
+\label{opis_cech_2}
+\end{table}
+
+Tabela&nbsp;\ref{opis_cech_2} zawiera opis zmiennych.
+
+Zmienną określającą klasy jest zmienna ``Type``.
+
+```{r tabela_type}
+# Tabela dla zmiennej Type
+table(Glass$Type)
+```
+Zawiera ona 6 klas określających typy szkła.
+
+Nie występują obserwacje nietypowe ani brakujące, a wszystkie zmienne od razu miały przypisane poprawnie typy (wszystkie poza Type są liczbowe, Type jest jakościowa).
+
+## Wstępna analiza danych
+Przed porównaniem metod klasyfikacji dokonam wstępnej analizy danych.
+
+Przywołam jeszcze raz tabelę przedstawiającą przynależność poszczególnych obserwacji do klas.
+
+```{r tabela_type_2}
+# Tabela dla zmiennej Type
+table(Glass$Type)
+```
+```{r error_glass, echo=FALSE}
+# Obliczenie błędu klasyfikacji w wyniku przypisania wszystkich obserwacji do typu 2
+glass.classification.error <- (dim(Glass)[1]-max(table(Glass$Type)))/dim(Glass)[1]
+```
+
+Zaobserwować można dość istotne dysproporcje pomiędzy przynależnością elementów do poszczególnych klas (najliczniejsza, druga, zawiera 76 obserwacji, a najmniej liczna, szósta, tylko 9). Gdyby wszystkie elementy przypisać do klasy drugiej, błąd klasyfikacji wynosiłby `r glass.classification.error`.
+
+Następnie porównam wartości poszczególnych zmiennych, aby ocenić, czy konieczna może być standaryzacja.
+
+```{r glass_zmienne_boxplot, echo=FALSE, fig.cap="\\label{fig:glass_zmienne_boxplot_w}Wykresy pudełowe wartości poszczególnych zmiennych liczbowych z danych Glass"}
+# Utworzenie wykresu
+boxplot(Glass[,1:9], las=2, col=rainbow(9), main="Wykresy zmiennych liczbowych")
+```
+Na wykresie&nbsp;\ref{fig:glass_zmienne_boxplot_w} łatwo można zauważyć, że poszczególne zmienne dość znacząco różnią się pomiędzy sobą, więc na potrzeby metody k-najbliższych sąsiadów zastosuję standaryzację.
+
+```{r standaryzacja}
+# Standaryzacja
+Glass.scaled <- cbind(scale(Glass[,1:9]), Glass$Type)
+# Dostosowanie nowego obiektu
+Glass.scaled <- as.data.frame(Glass.scaled)
+names(Glass.scaled)[10] <- "Type"
+Glass.scaled$Type <- as.factor(Glass.scaled$Type)
+```
+
+Zobaczę, jak po standaryzacji prezentują się poszczególne zmienne.
+
+```{r glass_scaled_zmienne_boxplot, echo=FALSE, fig.cap="\\label{fig:glass_scaled_zmienne_boxplot_w}Wykresy pudełowe wartości poszczególnych zmiennych liczbowych z danych Glass.scaled"}
+# Utworzenie wykresu
+boxplot(Glass.scaled[,1:9], las=2, col=rainbow(9), main="Wykresy zmiennych po standaryzacji")
+```
+Wykres&nbsp;\ref{fig:glass_scaled_zmienne_boxplot_w} pokazuje, że dane ustandarysowane rzeczywiście są bardziej jednolite.
+
+Ostatnim elementem będzie ocena zdolności dyskryminacyjnych dla poszczególnych zmiennych.
+
+```{r dyskryminacja1, echo=FALSE, fig.cap="\\label{fig:dyskryminacja1_w}Ocena zdolności dyskryminacyjnych zmiennej RI"}
+boxplot(Glass[,1]~Glass$Type, col=rainbow(6), main=names(Glass)[1], ylab=names(Glass)[1], xlab="Type")
+```
+```{r dyskryminacja2, echo=FALSE, fig.cap="\\label{fig:dyskryminacja2_w}Ocena zdolności dyskryminacyjnych zmiennej Na"}
+boxplot(Glass[,2]~Glass$Type, col=rainbow(6), main=names(Glass)[2], ylab=names(Glass)[2], xlab="Type")
+```
+```{r dyskryminacja3, echo=FALSE, fig.cap="\\label{fig:dyskryminacja3_w}Ocena zdolności dyskryminacyjnych zmiennej Mg"}
+boxplot(Glass[,3]~Glass$Type, col=rainbow(6), main=names(Glass)[3], ylab=names(Glass)[3], xlab="Type")
+```
+```{r dyskryminacja4, echo=FALSE, fig.cap="\\label{fig:dyskryminacja4_w}Ocena zdolności dyskryminacyjnych zmiennej Al"}
+boxplot(Glass[,4]~Glass$Type, col=rainbow(6), main=names(Glass)[4], ylab=names(Glass)[4], xlab="Type")
+```
+```{r dyskryminacja5, echo=FALSE, fig.cap="\\label{fig:dyskryminacja5_w}Ocena zdolności dyskryminacyjnych zmiennej Si"}
+boxplot(Glass[,5]~Glass$Type, col=rainbow(6), main=names(Glass)[5], ylab=names(Glass)[5], xlab="Type")
+```
+```{r dyskryminacja6, echo=FALSE, fig.cap="\\label{fig:dyskryminacja6_w}Ocena zdolności dyskryminacyjnych zmiennej K"}
+boxplot(Glass[,6]~Glass$Type, col=rainbow(6), main=names(Glass)[6], ylab=names(Glass)[6], xlab="Type")
+```
+```{r dyskryminacja7, echo=FALSE, fig.cap="\\label{fig:dyskryminacja7_w}Ocena zdolności dyskryminacyjnych zmiennej Ca"}
+boxplot(Glass[,7]~Glass$Type, col=rainbow(6), main=names(Glass)[7], ylab=names(Glass)[7], xlab="Type")
+```
+```{r dyskryminacja8, echo=FALSE, fig.cap="\\label{fig:dyskryminacja8_w}Ocena zdolności dyskryminacyjnych zmiennej Ba"}
+boxplot(Glass[,8]~Glass$Type, col=rainbow(6), main=names(Glass)[8], ylab=names(Glass)[8], xlab="Type")
+```
+```{r dyskryminacja9, echo=FALSE, fig.cap="\\label{fig:dyskryminacja9_w}Ocena zdolności dyskryminacyjnych zmiennej Fe"}
+boxplot(Glass[,9]~Glass$Type, col=rainbow(6), main=names(Glass)[9], ylab=names(Glass)[9], xlab="Type")
+```
+Na podstawie wykresów pudełkowych dla poszczególnych zmiennych można stwierdzić, że szczególnie obiecującymi zmiennymi są ``RI``, ``Na`` i ``Al``. Zmienne ``Mg``, ``Fe`` i ``Ba`` mają natomiast potencjał do rozróżnienia grup klas.
+
+## Podział danych na pozbiory uczący i testowy
+W późniejszym toku testów będę dzielić dane wielokrotnie na zbiory uczący i testowy, jednak na samym początku będę testować metody dla z góry określonego podziału.
+
+```{r glass_podzbiory}
+## Losowy podział na pozdbiory uczący i testowy
+glass.obs <- dim(Glass)[1]
+glass.learn.index <- sample(1:glass.obs,2/3*glass.obs)
+
+# utworzenie zbiorów uczącego i testowego
+glass.learn <- Glass[glass.learn.index,]
+glass.train <- Glass[-glass.learn.index,]
+
+# rzeczywiste etykietki
+etykietki.rzecz.learn <- glass.learn$Type
+etykietki.rzecz.train <- glass.train$Type
+
+# wymiary zbiorów
+glass.obs.learn <- dim(glass.learn)[1]
+glass.obs.train <- dim(glass.train)[1]
+
+## Podział dla danych ustandaryzowanych
+glass.scaled.learn <- Glass.scaled[glass.learn.index,]
+glass.scaled.train <- Glass.scaled[-glass.learn.index,]
+```
+
+## Metoda k-najbliższych sąsiadów
+Metoda ta polega na znalezieniu k sąsiadów o najmniejszej odległości (euklidesowej) i na podstawie tego, do której klasy należy najwięcej z tych sąsiadów, testowany obiekt otrzymuje etykietkę.
+
+\subsubsection{Utworzenie modelu i wyznaczenie prognozowanych etykietek}
+Na sam początek przetestuję prosty model na podstawie wyznaczonych wcześniej zbiorów uczącego i testowego, a jako liczbę sąsiadów wybiorę 5. Test jest przeprowadzony dla danych nieustandaryzowanych.
+
+```{r glass_knn_model}
+# Utworzenie podstawowego modelu
+model.knn.1 <- ipredknn(Type ~ ., data=glass.learn, k=5)
+
+# Predykcje dla zbioru uczącego
+glass.knn.etykietki.prog.learn <- 
+  predict(model.knn.1, glass.learn, type="class")
+
+# Predykcje dla zbioru testowego
+glass.knn.etykietki.prog.train <- 
+  predict(model.knn.1, glass.train, type="class")
+```
+
+\subsubsection{Macierze pomyłek}
+Kolejnym krokiem jest ocena dokładności modelu poprzez przeanalizowanie macierzy pomyłek i błędów klasyfikacji dla zbiorów uczącego i testowego.
+
+```{r glass_knn_ocena}
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.glass.knn1.learn <- 
+  table(glass.knn.etykietki.prog.learn, etykietki.rzecz.learn)
+
+# Dokładność
+glass.knn1.learn.accuracy <- 
+  sum(diag(conf.matrix.glass.knn1.learn))/glass.obs.learn
+
+# Błąd klasyfikacji
+glass.knn1.learn.error <- 1 - glass.knn1.learn.accuracy
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.glass.knn1.train <- 
+  table(glass.knn.etykietki.prog.train, etykietki.rzecz.train)
+
+# Dokładność
+glass.knn1.train.accuracy <- 
+  sum(diag(conf.matrix.glass.knn1.train))/glass.obs.train
+
+# Błąd klasyfikacji
+glass.knn1.train.error <- 1 - glass.knn1.train.accuracy
+```
+
+Macierz pomyłek dla zbioru uczącego prezentuje się następująco:
+
+```{r glass_knn_learn_macierz, echo=FALSE}
+conf.matrix.glass.knn1.learn
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.knn1.learn.accuracy`, zatem błąd klasyfikacji wynosi `r glass.knn1.learn.error`.
+
+Analogicznie, dla zbioru testowego, macierz pomyłek prezentuje się następująco:
+
+```{r glass_knn_train_macierz, echo=FALSE}
+conf.matrix.glass.knn1.train
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.knn1.train.accuracy`, zatem błąd klasyfikacji wynosi `r glass.knn1.train.error`.
+
+Dla zbioru uczącego dokładność jest znacznie większa niż dla zbioru testowego, jednak i tak błąd jest bardzo wysoki – bliski ćwierci obserwacji. Dla zbioru testowego jest jeszcze większy, około 40%.
+
+\subsubsection{Model, predykcje i ocena dla danych ustandaryzowanych}
+Następnym krokiem będzie utworzenie analogicznego modelu dla danych ustandaryzowanych.
+
+```{r glass_knn_scaled}
+# Utworzenie podstawowego modelu
+model.knn.scaled.1 <- ipredknn(Type ~ ., data=glass.scaled.learn, k=5)
+
+# Predykcje dla zbioru uczącego
+glass.knn.etykietki.prog.scaled.learn <- 
+  predict(model.knn.scaled.1, glass.scaled.learn, type="class")
+
+# Predykcje dla zbioru testowego
+glass.knn.etykietki.prog.scaled.train <- 
+  predict(model.knn.scaled.1, glass.scaled.train, type="class")
+
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.glass.knn1.scaled.learn <- 
+  table(glass.knn.etykietki.prog.scaled.learn, etykietki.rzecz.learn)
+
+# Dokładność
+glass.knn1.scaled.learn.accuracy <- 
+  sum(diag(conf.matrix.glass.knn1.scaled.learn))/glass.obs.learn
+
+# Błąd klasyfikacji
+glass.knn1.scaled.learn.error <- 1 - glass.knn1.scaled.learn.accuracy
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.glass.knn1.scaled.train <- 
+  table(glass.knn.etykietki.prog.scaled.train, etykietki.rzecz.train)
+
+# Dokładność
+glass.knn1.scaled.train.accuracy <- 
+  sum(diag(conf.matrix.glass.knn1.scaled.train))/glass.obs.train
+
+# Błąd klasyfikacji
+glass.knn1.scaled.train.error <- 1 - glass.knn1.scaled.train.accuracy
+```
+
+Macierz pomyłek dla zbioru uczącego w tym wypadku prezentuje się następująco:
+
+```{r glass_scaled_learn_macierz}
+conf.matrix.glass.knn1.scaled.learn
+```
+
+Dokładność klasyfikacji wynosi `r glass.knn1.scaled.learn.accuracy`, a jej błąd – `r glass.knn1.scaled.learn.error`.
+
+Macierz pomyłek dla zbioru testowego w tym wypadku prezentuje się następująco:
+
+```{r glass_scaled_train_macierz}
+conf.matrix.glass.knn1.scaled.train
+```
+
+Dokładność klasyfikacji wynosi `r glass.knn1.scaled.train.accuracy`, a jej błąd – `r glass.knn1.scaled.train.error`.
+
+Względem danych nieprzeskalowanych nie zmieniła się dokładność dla zbioru uczącego, lecz nieco poprawiła się dla zbioru testowego. Nadal nie daje to jednak zadowalających wyników.
+
+\subsubsection{Zaawansowane schematy oceny dokładności}
+Kolejnym krokiem będzie sprawdzenie dokładności przy pomocy zaawansowanych schematów. Ocenę wykonam na podstawie danych przeskalowanych, gdyż w poprzednim teście dały nieco niższy poziom błędu.
+
+```{r glass_knn_ocena_zaawansowana}
+# Utworzenie własnej funkcji
+my.predict  <- 
+  function(model, newdata) predict(model, newdata=newdata, type="class")
+my.ipredknn <- 
+  function(formula1, data1, ile.sasiadow) 
+    ipredknn(formula=formula1,data=data1,k=ile.sasiadow)
+
+## Porównanie błędów klasyfikacji dla ustalonej liczby sąsiadów
+## (metody: 10-fold cross-validation, bootstrap, .632plus)
+#CV
+glass.knn.cv <- errorest(Type ~., Glass.scaled, model=my.ipredknn, 
+                         predict=my.predict, estimator="cv", 
+                         est.para=control.errorest(k = 10), ile.sasiadow=5)
+
+#Boot
+glass.knn.boot <- errorest(Type ~., Glass.scaled, model=my.ipredknn, 
+                           predict=my.predict, estimator="boot", 
+                           est.para=control.errorest(nboot = 50), 
+                           ile.sasiadow=5)
+
+#.632plus
+glass.knn.632plus <- errorest(Type ~., Glass.scaled, model=my.ipredknn, 
+                              predict=my.predict, estimator="632plus", 
+                              est.para=control.errorest(nboot = 50), 
+                              ile.sasiadow=5)
+
+## Wyświetlenie wyników
+glass.knn.cv
+glass.knn.boot
+glass.knn.632plus
+```
+Błędy oscylują na podobnym, dość wysokim poziomie, jednak metoda .632plus daje najmniejszy ze wszystkich błędów. Największy błąd daje natomiast metoda bootstrap.
+
+\subsubsection{Wpływ liczby sąsiadów na błąd}
+Kolejnym elementem, który może wpłynąć na wyniki, jest dobór liczby sąsiadów w modelu. Przetestuję od 1 do 15 sąsiadów, a stosowaną metodą walidacji będzie .632plus, gdyż w poprzednim teście dała najniższy poziom błędu. Skorzystam z danych ustandaryzowanych.
+
+```{r glass_knn_parametry, fig.cap="\\label{fig:glass_knn_parametry_w}Wykres wpływu liczby sąsiadów na błąd klasyfikacji"}
+liczba.sasiadow.zakres <- 1:15
+wyniki1 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(Type ~., Glass.scaled, model=my.ipredknn, predict=my.predict, 
+           estimator="632plus", est.para=control.errorest(nboot = 50), 
+           ile.sasiadow=k)$error)
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, 
+     main="Wpływ liczby sąsiadów na błąd klasyfikacji", 
+     xlab="k (liczba sąsiadów)", ylab="błąd klasyfikacji (.632plus)")
+grid()
+```
+Wykres&nbsp;\ref{fig:glass_knn_parametry_w} pokazuje, że im więcej sąsiadów, tym błąd klasyfikacji wzrasta (z drobnymi wyjątkami, ale tendencja jest zdecydowanie rosnąca), jednak już dla jednego sąsiada błąd jest całkiem wysoki i wynosi `r wyniki1[1]`.
+
+\subsubsection{Różne kombinacje zmiennych}
+Ostatnim testem będzie przetestowanie różnych kombinacji zmiennych. Pod lupę wezmę kombinacje RI + Na + Al oraz Mg + Ba + Fe.
+
+```{r glass_knn_zmienne, fig.cap="\\label{fig:glass_knn_zmienne_w}Wykres wpływu doboru zmiennych na błąd klasyfikacji"}
+wyniki2 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(Type ~ RI + Na + Al, Glass.scaled, model=my.ipredknn, 
+           predict=my.predict, estimator="632plus", 
+           est.para=control.errorest(nboot = 50), ile.sasiadow=k)$error)
+wyniki3 <-  sapply(liczba.sasiadow.zakres, function(k)
+  errorest(Type ~ Mg + Ba + Fe, Glass.scaled, model=my.ipredknn, 
+           predict=my.predict, estimator="632plus", 
+           est.para=control.errorest(nboot = 50), ile.sasiadow=k)$error)
+
+blad.zakres <- range(c(wyniki1, wyniki2, wyniki3))
+
+plot(liczba.sasiadow.zakres, wyniki1, type="b", col="green", lwd=3, 
+     main="Porównanie modeli", xlab="k (liczba sąsiadów)", 
+     ylab="błąd klasyfikacji (.632plus)", ylim=blad.zakres)
+lines(liczba.sasiadow.zakres, wyniki2, type="b", col="red", lwd=3)
+lines(liczba.sasiadow.zakres, wyniki3, type="b", col="blue", lwd=3)
+legend("topright",legend=c("Model 1: Type ~.","Model 2: Type ~ RI + Ca + Al", 
+                           "Model 3: Type ~ Mg + Ba + Fe"),
+       col=c("green","red", "blue"), lwd=3, bg="azure2", cex=.5)
+grid()
+```
+Na wykresie&nbsp;\ref{fig:glass_knn_zmienne_w} można łatwo zauważyć, że kombinacja zmiennych RI + Na + Al daje wynik całkiem dobry (minimum `r min(wyniki2)`), zbliżony do wszystkich zmiennych, za to kombinacja Mg + Ba + Fe, która zdawała się mieć potencjał, jednak nie jest tak skuteczna, a jej błąd sięga niemal połowy przypadków (minimalny błąd wynosi `r min(wyniki3)`. I tak najlepszy wynik z tych wszystkich opcji daje uwzględnienie wszystkich zmiennych.
+
+## Drzewa klasyfikacyjne
+Następną rozpatrywaną metodą są drzewa klasyfikacyjne – drzewa binarne, dla których w każdym węźle dokonywany jest podział względem zmiennej w tym momencie najlepiej separującej dane.
+
+\subsubsection{Utworzenie modelu i wyznaczenie prognozowanych etykietek}
+Zacznę, tak jak wcześniej, od utworzenia modelu dla wyznaczonych zbiorów uczącego i testowego, a także wstępnej oceny jego dokładności. Na początku testować będę najprostszy, najbardziej podstawowy model.
+
+```{r glass_tree_model}
+# Utworzenie modelu
+glass.tree <- rpart(Type ~ ., data=glass.learn)
+```
+
+Wyświetlę także utworzone drzewo.
+
+```{r glass_tree_plot, echo=FALSE, fig.cap="\\label{fig:glass_tree_plot_w}Wizualizacja najprostszego drzewa klasyfikacyjnego"}
+rpart.plot(glass.tree, type=0, legend.y=1)
+```
+
+Na wykresie&nbsp;\ref{fig:glass_tree_plot_w} można zauważyć, że drzewo to nie przypisuje wartości do klasy 6, więc z pewnością nie jest w pełni dokładne.
+
+Wyznaczę jeszcze prognozowane etykietki klas.
+
+```{r glass_tree_predict}
+# Etykietki dla zbioru uczącego
+glass.tree.etykietki.prog.learn <- predict(glass.tree, newdata=glass.learn, 
+                                           type="class")
+
+# Etykietki dla zbioru testowego
+glass.tree.etykietki.prog.train <- predict(glass.tree, newdata=glass.train, 
+                                           type="class")
+```
+
+\subsubsection{Macierz pomyłek}
+Jak we wszystkich poprzednich przypadkach, dokładność klasyfikacji ocenię poprzez macierze pomyłek i zmierzenie błędów klasyfikacji.
+
+```{r glass_tree_ocena}
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.glass.tree.learn <- table(glass.tree.etykietki.prog.learn, 
+                                      etykietki.rzecz.learn)
+
+# Dokładność
+glass.tree.learn.accuracy <- 
+  sum(diag(conf.matrix.glass.tree.learn))/glass.obs.learn
+
+# Błąd klasyfikacji
+glass.tree.learn.error <- 1 - glass.tree.learn.accuracy
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.glass.tree.train <- table(glass.tree.etykietki.prog.train, 
+                                      etykietki.rzecz.train)
+
+# Dokładność
+glass.tree.train.accuracy <- 
+  sum(diag(conf.matrix.glass.tree.train))/glass.obs.train
+
+# Błąd klasyfikacji
+glass.tree.train.error <- 1 - glass.tree.train.accuracy
+```
+
+Dla zbioru uczącego macierz pomyłek wygląda następująco:
+
+```{r glass_tree_learn_matrix}
+conf.matrix.glass.tree.learn
+```
+Dokładność tej klasyfikacji wynosi `r glass.tree.learn.accuracy`, zatem błąd jest równy `r glass.tree.learn.error`.
+
+Analogicznie, dla zbioru testowego macierz pomyłek wygląda następująco:
+
+```{r glass_tree_train_matrix}
+conf.matrix.glass.tree.train
+```
+Dokładność tej klasyfikacji wynosi `r glass.tree.train.accuracy`, zatem błąd jest równy `r glass.tree.train.error`.
+
+Błąd dla zbioru treningowego jest wyższy niż dla zbioru uczącego, jednak oba są dość wysokie – ponad 1/5 wszystkich obserwacji.
+
+\subsubsection{Zaawansowane schematy oceny dokładności}
+Po utworzeniu pierwotnego modelu przetestuję rozmaite schematy oceny dokładności, aby sprawdzić, czy dla bazowego modelu da się poprawić wyniki.
+
+```{r glass_tree_zaawansowana_ocena}
+# Utworzenie własnej funkcji
+my.rpart <- function(formula1, data1, ile.split, zlozonosc, glebokosc) 
+  rpart(formula=formula1,data=data1,minsplit=ile.split,cp=zlozonosc,
+        maxdepth=glebokosc)
+
+## Porównanie błędów klasyfikacji dla ustalonych z góry parametrów domyślnych 
+## (metody: 10-fold cross-validation, bootstrap, .632plus)
+#CV
+glass.tree.cv <- errorest(Type ~., Glass, model=my.rpart, predict=my.predict, estimator="cv", 
+         est.para=control.errorest(k = 10), ile.split=20,
+         zlozonosc=0.01,glebokosc=30)
+
+#Boot
+glass.tree.boot <- errorest(Type ~., Glass, model=my.rpart, predict=my.predict, estimator="boot",
+         est.para=control.errorest(nboot = 50), ile.split=20,
+         zlozonosc=0.01,glebokosc=30)
+
+#.632plus
+glass.tree.632plus <- errorest(Type ~., Glass, model=my.rpart, predict=my.predict, 
+         estimator="632plus", est.para=control.errorest(nboot = 50),
+         ile.split=20, zlozonosc=0.01,glebokosc=30)
+
+# Wyświetlenie wyników
+glass.tree.cv
+glass.tree.boot
+glass.tree.632plus
+```
+Błędy są do siebie dość zbliżone, choć najlepszy wynik daje, jak wcześniej, .632plus. Tak więc tej metody walidacji będę używać w dalszej części badań.
+
+\subsubsection{Dobór różnych parametrów i zmiennych}
+W następnej części przetestuję, jak dobór parametrów i zmiennych wpływa na wyniki. Testowanymi parametrami będą:
+
+* minsplit (od 1 do 20),
+* cp (od 0,01 do 0,2, co 0,01),
+* maxdepth (od 1 do 30).
+
+Dla każdego parametru dokonam też sprawdzenia dla poszczególnych zmiennych. Zmiennymi, które będę porównywać, będą:
+
+* wszystkie zmienne,
+* RI + Na + Al,
+* Mg + Fe + Ba.
+
+```{r glass_tree_parametry}
+minsplit.param <- 1:20
+cp.param <- seq(0.01, 0.2, by=0.01)
+maxdepth.param <- 1:30
+
+# minsplit
+wyniki.minsplit1 <- sapply(minsplit.param, function(k)
+  errorest(Type ~., Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=k, zlozonosc=0.01,glebokosc=30)$error)
+wyniki.minsplit2 <- sapply(minsplit.param, function(k)
+  errorest(Type ~ RI + Na + Al, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=k, zlozonosc=0.01,glebokosc=30)$error)
+wyniki.minsplit3 <- sapply(minsplit.param, function(k)
+  errorest(Type ~ Mg + Ba + Fe, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=k, zlozonosc=0.01,glebokosc=30)$error)
+
+# Cp
+wyniki.cp1 <- sapply(cp.param, function(k)
+  errorest(Type ~., Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=k,glebokosc=30)$error)
+wyniki.cp2 <- sapply(cp.param, function(k)
+  errorest(Type ~ RI + Na + Al, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=k,glebokosc=30)$error)
+wyniki.cp3 <- sapply(cp.param, function(k)
+  errorest(Type ~ Mg + Ba + Fe, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=k,glebokosc=30)$error)
+
+# Maxdepth
+wyniki.maxdepth1 <- sapply(maxdepth.param, function(k)
+  errorest(Type ~., Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=0.01,glebokosc=k)$error)
+wyniki.maxdepth2 <- sapply(maxdepth.param, function(k)
+  errorest(Type ~ RI + Na + Al, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=0.01,glebokosc=k)$error)
+wyniki.maxdepth3 <- sapply(maxdepth.param, function(k)
+  errorest(Type ~ Mg + Ba + Fe, Glass, model=my.rpart, predict=my.predict,
+           estimator="632plus", est.para=control.errorest(nboot = 50),
+           ile.split=20, zlozonosc=0.01,glebokosc=k)$error)
+```
+
+Sprawdzę wyniki zmiany parametrów na wykresach.
+
+```{r glass_tree_minsplit_plot, echo=FALSE, fig.cap="\\label{fig:glass_tree_minsplit_plot_w}Wpływ minimalnej wielkości, dla której dokonywany jest podział, na błąd"}
+minsplit.error <- range(c(wyniki.minsplit1, wyniki.minsplit2,
+                          wyniki.minsplit3))
+plot(minsplit.param, wyniki.minsplit1, type="b", col="green", lwd=3, main="Wpływ minimalnego podziału na błąd klasyfikacji", xlab="k (minimalna liczba elementów)", ylab="błąd klasyfikacji (.632plus)", ylim=minsplit.error)
+lines(minsplit.param, wyniki.minsplit2, type="b", col="red", lwd=3)
+lines(minsplit.param, wyniki.minsplit3, type="b", col="blue", lwd=3)
+legend("topright",legend=c("Model 1: Type ~.","Model 2: Type ~ RI + Ca + Al", "Model 3: Type ~ Mg + Ba + Fe"),col=c("green","red", "blue"), lwd=3, bg="azure2", cex=.5)
+grid()
+```
+Na wykresie&nbsp;\ref{fig:glass_tree_minsplit_plot_w} można zauważyć, że najlepsze wyniki otrzymujemy dla 5 elementów przy uwzględnieniu wszystkich zmiennych: `r min(wyniki.minsplit1)`.
+
+```{r glass_tree_cp_plot, echo=FALSE, fig.cap="\\label{fig:glass_tree_cp_plot_w}Wpływ złożoności na błąd"}
+cp.error <- range(c(wyniki.cp1, wyniki.cp2, wyniki.cp3))
+plot(cp.param, wyniki.cp1, type="b", col="green", lwd=3, main="Wpływ złożoności na błąd klasyfikacji", xlab="k (złożoność)", ylab="błąd klasyfikacji (.632plus)", ylim=cp.error)
+lines(cp.param, wyniki.cp2, type="b", col="red", lwd=3)
+lines(cp.param, wyniki.cp3, type="b", col="blue", lwd=3)
+legend("topright",legend=c("Model 1: Type ~.","Model 2: Type ~ RI + Ca + Al", "Model 3: Type ~ Mg + Ba + Fe"),col=c("green","red", "blue"), lwd=3, bg="azure2", cex=.5)
+grid()
+```
+
+Na wykresie&nbsp;\ref{fig:glass_tree_cp_plot_w} można zauważyć, że najlepsze wyniki otrzymujemy dla złożoności 0,03 przy uwzględnieniu wszystkich zmiennych – błąd wynosi `r min(wyniki.cp1)`.
+
+```{r glass_tree_maxdepth_plot, echo=FALSE, fig.cap="\\label{fig:glass_tree_maxdepth_plot_w}Wpływ maksymalnej głębokości na błąd"}
+maxdepth.error <- range(c(wyniki.maxdepth1, wyniki.maxdepth2, wyniki.maxdepth3))
+plot(maxdepth.param, wyniki.maxdepth1, type="b", col="green", lwd=3, main="Wpływ maksymalnej głębokości na błąd klasyfikacji", xlab="k (maksymalna głębokość)", ylab="błąd klasyfikacji (.632plus)", ylim=maxdepth.error)
+lines(maxdepth.param, wyniki.maxdepth2, type="b", col="red", lwd=3)
+lines(maxdepth.param, wyniki.maxdepth3, type="b", col="blue", lwd=3)
+legend("topright",legend=c("Model 1: Type ~.","Model 2: Type ~ RI + Ca + Al", "Model 3: Type ~ Mg + Ba + Fe"),col=c("green","red", "blue"), lwd=3, bg="azure2", cex=.5)
+grid()
+```
+Na wykresie&nbsp;\ref{fig:glass_tree_maxdepth_plot_w} można zauważyć (choć nie tak łatwo), że najlepsze wyniki są osiągnięte dla maksymalnej głębokości 14 z uwzględnieniem wszystkich zmiennych. Błąd wynosi wtedy `r min(wyniki.maxdepth1)`.
+
+Przy wszystkich parametrach najlepsze wyniki daje uwzględnienie wszystkich zmiennych. Nieco gorzej radzi sobie model RI + Na + Al, a najgorzej – Mg + Fe + Ba.
+
+## Naiwny klasyfikator bayesowski
+Ostatnim z testowanych klasyfikatorów będzie naiwny klasyfikator Bayesowski. Opiera się on na wyznaczeniu prawdopodobieństwa warunkowego – że dany element należy do wybranej klasy, pod warunkiem, że wektor zmiennych objaśniających ma konkretną wartość. W wariancie naiwnym zakładamy, że wszystkie zmienne objaśniające są niezależne, co upraszcza model.
+
+W analizach wykorzystam dwie funkcje – naiveBayes z pakietu e1071, która zakłada, że zmienne ciągłe mają rozkład normalny, oraz NaiveBayes z pakietu klaR, któa umożliwia jądrową estymację gęstości zmiennych ciągłych.
+
+\subsubsection{Utworzenie modeli i wyznaczenie prognozowanych etykietek}
+Na początek utworzę oba modele w wersji podstawowej i wyznaczę prognozowane etykietki.
+
+```{r glass_naive_bayes_model}
+## e1071
+# model
+glass.NB1 <- naiveBayes(Type~., data=glass.learn)
+# prognozowane etykietki dla zbioru uczącego
+glass.NB1.etykietki.prog.learn <- predict(glass.NB1, glass.learn)
+# prognozowane etykietki dla zbioru testowego
+glass.NB1.etykietki.prog.train <- predict(glass.NB1, glass.train)
+
+## klaR
+# model
+glass.NB2 <- NaiveBayes(Type~., data=glass.learn, usekernel=TRUE)
+# prognozowane etykietki dla zbioru uczącego
+glass.NB2.etykietki.prog.learn <- predict(glass.NB2, glass.learn)$class
+# prognozowane etykietki dla zbioru testowego
+glass.NB2.etykietki.prog.train <- predict(glass.NB2, glass.train)$class
+```
+
+\subsubsection{Macierze pomyłek}
+Po utworzeniu modeli porównam ich dokładność dla zbiorów uczącego i testowego.
+
+```{r glass_naive_bayes_ocena}
+### e1071
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.glass.NB1.learn <- 
+  table(glass.NB1.etykietki.prog.learn, etykietki.rzecz.learn)
+
+# Dokładność
+glass.NB1.learn.accuracy <-
+  sum(diag(conf.matrix.glass.NB1.learn))/glass.obs.learn
+
+# Błąd klasyfikacji
+glass.NB1.learn.error <- 1 - glass.NB1.learn.accuracy
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.glass.NB1.train <- 
+  table(glass.NB1.etykietki.prog.train, etykietki.rzecz.train)
+
+# Dokładność
+glass.NB1.train.accuracy <-
+  sum(diag(conf.matrix.glass.NB1.train))/glass.obs.train
+
+# Błąd klasyfikacji
+glass.NB1.train.error <- 1 - glass.NB1.train.accuracy
+
+### klaR
+## Zbiór uczący
+# Macierz pomyłek
+conf.matrix.glass.NB2.learn <- 
+  table(glass.NB2.etykietki.prog.learn, etykietki.rzecz.learn)
+
+# Dokładność
+glass.NB2.learn.accuracy <-
+  sum(diag(conf.matrix.glass.NB2.learn))/glass.obs.learn
+
+# Błąd klasyfikacji
+glass.NB2.learn.error <- 1 - glass.NB2.learn.accuracy
+
+## Zbiór testowy
+# Macierz pomyłek
+conf.matrix.glass.NB2.train <- 
+  table(glass.NB2.etykietki.prog.train, etykietki.rzecz.train)
+
+# Dokładność
+glass.NB2.train.accuracy <-
+  sum(diag(conf.matrix.glass.NB2.train))/glass.obs.train
+
+# Błąd klasyfikacji
+glass.NB2.train.error <- 1 - glass.NB2.train.accuracy
+```
+
+Po wyznaczeniu odpowiednich wielkości przyjrzę się im.
+
+Dla modelu zakładającego rozkład gaussowski, dla zbioru uczącego macierz pomyłek prezentuje się następująco:
+
+```{r glass_naive_bayes_e1071_macierz_learn}
+conf.matrix.glass.NB1.learn
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.NB1.learn.accuracy`, zatem błąd wynosi `r glass.NB1.learn.error`.
+
+Dla tego samego modelu, dla zbioru testowego macierz pomyłek prezentuje się następująco:
+
+```{r glass_naive_bayes_e1071_macierz_train}
+conf.matrix.glass.NB1.train
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.NB1.train.accuracy`, zatem błąd wynosi `r glass.NB1.train.error`.
+
+Dla modelu zakładającego jądrową estymację gęstości, dla zbioru uczącego macierz pomyłek prezentuje się następująco:
+
+```{r glass_naive_bayes_klaR_macierz_learn}
+conf.matrix.glass.NB2.learn
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.NB2.learn.accuracy`, zatem błąd wynosi `r glass.NB2.learn.error`.
+
+Dla tego samego modelu, dla zbioru testowego macierz pomyłek prezentuje się następująco:
+
+```{r glass_naive_bayes_klaR_macierz_train}
+conf.matrix.glass.NB2.train
+```
+
+Dokładność tej klasyfikacji wynosi `r glass.NB2.train.accuracy`, zatem błąd wynosi `r glass.NB2.train.error`.
+
+Dla zbioru uczącego widać znaczną różnicę w modelach – dla jądrowej estymacji gęstości błąd jest niemal dwukrotnie mniejszy niż dla założenia rozkładu gaussowskiego. Natomiast w przypadku zbioru testowego błąd dla drugiego modelu też jest nieco mniejszy, jednak różnica nie jest tak istotna i w obu przypadkach jest większy niż 50%.
+
+\subsubsection{Zaawansowane schematy oceny dokładności}
+W kolejnej części, jak wcześniej, sprawdzę zaawansowane schematy oceny dokładności dla obu modeli.
+
+```{r glass_naive_bayes_e1071_zaawansowana_ocena}
+# Utworzenie własnej funkcji
+my.nb.e1071 <- function(formula1, data1) naiveBayes(formula=formula1,data=data1)
+
+## Porównanie błędów klasyfikacji
+## (metody: 10-fold cross-validation, bootstrap, .632plus)
+#CV
+glass.NB1.cv <- errorest(Type ~., Glass, model=my.nb.e1071, predict=my.predict,
+         estimator="cv", est.para=control.errorest(k = 10))
+
+#Boot
+glass.NB1.boot <- errorest(Type ~., Glass, model=my.nb.e1071, predict=my.predict,
+         estimator="boot", est.para=control.errorest(nboot = 50))
+
+#.632plus
+glass.NB1.632plus <- errorest(Type ~., Glass, model=my.nb.e1071, predict=my.predict,
+         estimator="632plus", est.para=control.errorest(nboot = 50))
+
+# Wyświetlenie wyników
+glass.NB1.cv
+glass.NB1.boot
+glass.NB1.632plus
+```
+Dla modelu zakładającego rozkład gaussowski błędy są bardzo wysokie, ponad 50%. Ponadto znacznie różnią się między sobą – pomiędzy najmniejszym błędem, z metody .632 plus, a największym, z metody cross-validation, występuje różnica prawie 0,08.
+
+Dla drugiego modelu została pominięte metoda cross-validation, ze względu na fakt, że losuje w grupach często wyłącznie 1 obserwację. Przez to niemożliwa jest jądrowa estymacja gęstości i zwrócony zostaje błąd.
+
+```{r glass_naive_bayes_klaR_zaawansowana_ocena}
+# Utworzenie własnej funkcji
+my.predict2  <- function(model, newdata) predict(model, newdata=newdata,
+                                                 type="class")$class
+my.nb.klaR <- function(formula1, data1)
+  NaiveBayes(formula=formula1,data=data1, usekernel=TRUE)
+
+# Porównanie błędów klasyfikacji (metody: bootstrap, .632plus)
+#Boot
+glass.NB2.boot <- errorest(Type ~., Glass, model=my.nb.klaR, predict=my.predict2,
+         estimator="boot", est.para=control.errorest(nboot = 50))
+
+#.632plus
+glass.NB2.632plus <- errorest(Type ~., Glass, model=my.nb.klaR, predict=my.predict2,
+         estimator="632plus", est.para=control.errorest(nboot = 50))
+
+# Wyświetlenie wyników
+glass.NB2.boot
+glass.NB2.632plus
+```
+Dla modelu zakładającego jądrową estymację gęstości metoda .632plus jest nieco lepsza, ale i tak błąd jest wysoki, wynoszący przynajmniej 35%.
+
+\subsubsection{Różne kombinacje zmiennych}
+Na koniec, dla obu modeli i metody oceny .632plus dokonam oceny dla poszczególnych kombinacji zmiennych. Jak wcześniej, uwzględnię wszystkie zmienne, zmienne RI + Na + Al oraz zmienne Mg + Fe + Ba.
+
+```{r glass_naive_bayes_zmienne}
+## e1071
+# Wszystkie zmienne
+wyniki.e1071.1 <- errorest(Type ~., Glass, model=my.nb.e1071,
+                           predict=my.predict, estimator="632plus",
+                           est.para=control.errorest(nboot = 50))
+# RI + Na + Al
+wyniki.e1071.2 <- errorest(Type ~ RI + Na + Al, Glass, model=my.nb.e1071,
+                           predict=my.predict, estimator="632plus",
+                           est.para=control.errorest(nboot = 50))
+# Mg + Fe + Ba
+wyniki.e1071.3 <- errorest(Type ~ Mg + Fe + Ba, Glass, model=my.nb.e1071,
+                           predict=my.predict, estimator="632plus",
+                           est.para=control.errorest(nboot = 50))
+
+## klaR
+# Wszystkie zmienne
+wyniki.klaR.1 <- errorest(Type ~., Glass, model=my.nb.klaR,
+                          predict=my.predict2, estimator="632plus",
+                          est.para=control.errorest(nboot = 50))
+# RI + Na + Al
+wyniki.klaR.2 <- errorest(Type ~ RI + Na + Al, Glass, model=my.nb.klaR,
+                          predict=my.predict2, estimator="632plus",
+                          est.para=control.errorest(nboot = 50))
+# Mg + Fe + Ba
+wyniki.klaR.3 <- errorest(Type ~ Mg + Fe + Ba, Glass, model=my.nb.klaR,
+                          predict=my.predict2, estimator="632plus",
+                          est.para=control.errorest(nboot = 50))
+```
+Wyniki prezentują się następująco:
+
+\begin{table}[H]
+\centering
+\begin{tabular}{|c|c|c|c|}
+\hline
+\textbf{Model}& \textbf{Wszystkie zmienne} & \textbf{RI + Na + Al} & \textbf{Mg + Fe + Ba}\\
+\hline
+\textbf{e1071} & `r wyniki.e1071.1$error` & `r wyniki.e1071.2$error` & `r wyniki.e1071.3$error` \\
+\hline
+\textbf{klaR} & `r wyniki.klaR.1$error` & `r wyniki.klaR.2$error` & `r wyniki.klaR.3$error` \\
+\hline
+\end{tabular}
+\caption{Błędy klasyfikacji dla różnych zmiennych w dwóch modelach naiwnego klasyfikatora Bayesowskiego}
+\label{wyniki_nb_zmienne}
+\end{table}
+
+Na podstawie tabeli&nbsp;\ref{wyniki_nb_zmienne} zauważyć można, że, w przeciwieństwie do poprzednich metod, użycie kombinacji zmiennych RI + Na + Al zmniejsza błąd klasyfikacji (lepsze wyniki otrzymamy dla klaR). Natomiast kombinacja Mg + Fe + Ba zwiększa ten błąd (w przypadku e1071 nawet do 70%).
+
+## Wnioski
+W niniejszym sprawozdaniu porównałam trzy metody klasyfikacji dla danych Glass. Ze względu na dużą liczbę klas we wszystkich błędy klasyfikacji są dość wysokie – żaden nie jest niższy niż 0,2.
+
+\subsubsection{Kombinacje zmiennych}
+Analizowałam trzy kombinacje zmiennych: wszystkie zmienne, zmienne RI + Na + Al oraz zmienne Mg + Fe + Ba. Dla zdecydowanej większości metod najlepszy wynik dawało uwzględnienie wszystkich zmiennych, w drugiej kolejności kombinacja RI + Na + Al, a w trzeciej kombinacja Mg + Fe + Ba. Zapewne wynika to z faktu, że połączenie wszystkich zmiennych daje największe zróżnicowanie poszczególnych klas.
+
+Jedynym wyjątkiem okazał się naiwny klasyfikator Bayesowski – w jego przypadku najlepszy wynik daje uwzględnienie kombinacji zmiennych RI + Na + Al, a uwzględnienie wszystkich zmiennych jest na drugim miejscu. Może to wynikać z faktu, że w tym klasyfikatorze czynione jest założenie dotyczące niezależności zmiennych, niekoniecznie prawdziwe. Im więcej zmiennych branych jest pod uwagę, tym błąd wynikający z tego założenia będzie większy, zatem dzięki ograniczeniu liczby zmiennych objaśniających model w rzeczywistości się poprawia.
+
+\subsubsection{Parametry}
+Dobór różnych parametrów również miał znaczenie.
+
+* Dla metody knn im mniej sąsiadów, tym lepsze wyniki – najlepszy wynik został osiągnięty dla uwzględnienia tylko 1 sąsiada. 
+* Dla drzew klasyfikacyjnych najniższy błąd udało się osiągnąć dla parametrów: minsplit=5, cp=0,01, maxdepth=30. Może to wynikać z faktu, że klasa 6 jest bardzo mało liczna i dla wyższych wartości minsplit przydział elementów do tej klasy w ogóle nie następuje (patrz rysunek&nbsp;\ref{fig:glass_tree_plot_w} dla modelu ogólnego, który nie przypisuje żadnych elementów do klasy 6). Mimo wszystko jednak zmiany parametru minsplit aż tak nie zmieniają wyników. Dla parametru cp generalnie im wyższa złożoność, tym wyższy błąd. Dla parametru maxdepth dla bardzo niskich wartości jest bardzo wysoki błąd (co wynika z tego, że nie ma wystarczająco dużo podziałów), ale dla większych możliwych głębokości błąd ten utrzymuje się na w miarę podobnym poziomie.
+* Dla naiwnego klasyfikatora Bayesowskiego zastosowanie jądrowej estymacji gęstości znacząco poprawia wyniki. Pokazuje to, że założenie, iż zmienne objaśniające mają rozkład gaussowski, w tym przypadku mija się z prawdą.
+
+\subsubsection{Metody klasyfikacji}
+```{r ostateczne_wyniki_wyliczenia, echo=FALSE}
+# Minima dla zbioru uczącego
+min.knn.learn <- min(c(glass.knn1.learn.error,glass.knn1.scaled.learn.error))
+min.nb.learn <- min(c(glass.NB1.learn.error, glass.NB2.learn.error))
+
+# Minima dla zbioru testowego
+min.knn.train <- min(c(glass.knn1.train.error, glass.knn1.scaled.train.error))
+min.nb.train <- min(c(glass.NB1.train.error, glass.NB2.train.error))
+
+# Minima dla metod oceny dokładności
+min.knn.validation <- min(c(glass.knn.cv$error, glass.knn.boot$error, glass.knn.632plus$error))
+min.tree.validation <- min(c(glass.tree.cv$error, glass.tree.boot$error, glass.tree.632plus$error))
+min.nb.validation <- min(c(glass.NB1.cv$error, glass.NB1.boot$error, glass.NB1.632plus$error, glass.NB2.boot$error, glass.NB2.632plus$error))
+
+# Minima dla różnych parametrów
+min.knn.neighbors <- min(wyniki1)
+min.tree.minsplit <- min(wyniki.minsplit1)
+min.tree.cp <- min(wyniki.cp1)
+min.tree.maxdepth <- min(wyniki.maxdepth1)
+min.nb.variables <- min(c(wyniki.e1071.1$error, wyniki.e1071.2$error, wyniki.e1071.3$error, wyniki.klaR.1$error, wyniki.klaR.2$error, wyniki.klaR.3$error))
+```
+Przedstawię najniższe błędy, jakie udało się uzyskać poszczególnymi metodami, w odpowiednich momentach eksperymentu.
+
+**Metoda knn:**
+
+* dla zbioru uczącego: `r min.knn.learn`,
+* dla zbioru testowego: `r min.knn.train`,
+* dla metod oceny dokładności: `r min.knn.validation`,
+* dla różnej liczby sąsiadów i różnych zbiorów zmiennych (razem): `r min.knn.neighbors`.
+
+**Metoda tree:**
+
+* dla zbioru uczącego: `r glass.tree.learn.error`,
+* dla zbioru testowego: `r glass.tree.train.error`,
+* dla metod oceny dokładności: `r min.tree.validation`,
+* dla parametru minsplit (wszystkie kombinacje zmiennych): `r min.tree.minsplit`,
+* dla parametru cp (wszystkie kombinacje zmiennych): `r min.tree.cp`,
+* dla parametru maxdepth (wszystkie kombinacje zmiennych): `r min.tree.maxdepth`.
+
+**Metoda naive Bayes (oba modele):**
+
+* dla zbioru uczącego: `r min.nb.learn`,
+* dla zbioru testowego: `r min.nb.train`,
+* dla metod oceny dokładności: `r min.nb.validation`,
+* dla poszczególnych kombinacji zmiennych: `r min.nb.variables`.
+
+Zatem:
+
+* dla zbioru uczącego najlepsze wyniki daje knn,
+* dla zbioru testowego najlepsze wyniki daje również knn,
+* dla różnych metod walidacji najlepsze wyniki ostatecznie zwraca tree,
+* dla różnych parametrów i podzbiorów zmiennych objaśniających najlepsze wyniki zwraca knn.
+
+Oznacza to, że po odpowiednim doborze parametrów ostatecznie najlepiej sprawdziła się metoda k-najbliższych sąsiadów. Choć wyniki drzew klasyfikacyjnych były nieco gorsze (przez algorytm, który może pomijać mało liczne klasy), to ostatecznie okazały się dosyć zbliżone. Najgorzej poradził sobie naiwny klasyfikator Bayesowski, nawet po zastosowaniu jądrowej estymacji gęstości rozkładów zmiennych objaśniających.
+
+\subsubsection{Metody oceny dokładności}
+Właściwie dla wszystkich metod klasyfikacji ocena dokładności przy użyciu metody .632plus zwraca najmniejszy błąd, zatem wybór metody ma wpływ na wyniki.
